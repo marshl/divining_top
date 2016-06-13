@@ -1,66 +1,79 @@
+﻿from optparse import OptionParser
 import urllib.request
+import psycopg2
 import zipfile
 import json
 import requests
 from os import path
 
 dataFolder = '../data'
+
+parser = OptionParser()
+
+parser.add_option("-c", "--connection", dest="connection_string",
+                  help="The postgres connection string")
+
+parser.add_option("-d", "--download", action="store_true", dest="download",
+                  help="downloads the json file even if it already exists")
+
+(options, args) = parser.parse_args()
+
 jsonZip = path.join( dataFolder, 'AllSets-x.json.zip' )
 jsonFile = path.join( dataFolder, 'AllSets-x.json' )
 jsonPrettyFile = path.join( dataFolder, 'AllSets-x-pretty.json' )
-#urllib.request.urlretrieve( "http://mtgjson.com/json/AllSets-x.json.zip", jsonZip )
 
+def main():
+    if options.download or not path.isfile(jsonFile):
+        download_json_data()
 
+    json_data = parse_json_data()
 
-url = "http://mtgjson.com/json/AllSets-x.json.zip"
-r = requests.get(url)
+    conn = connect_to_database()
 
-with open(jsonZip,'wb') as output:
-    output.write(r.content)
+    update_set_information(json_data, conn)
 
+def parse_json_data():
+    f = open( jsonFile, 'r', encoding="utf8" )
+    json_data = json.load( f, encoding='UTF-8' )
+    f.close()
 
-jsonZip = zipfile.ZipFile(jsonZip)
-jsonZip.extractall(dataFolder)
+    json_data = sorted( json_data.items(), key=lambda set: set[1]["releaseDate"] )
 
-f = open( jsonFile, 'r', encoding="utf8" )
-#data = f.read().decode('utf8')
-jsonData = json.load( f, encoding='UTF-8' )
-f.close()
+    return json_data
 
-#print( json.dumps( jsonData, sort_keys=True, indent=4, separators=(',', ': ') ) )
+def download_json_data():
+      
+    url = "http://mtgjson.com/json/AllSets-x.json.zip"
+    r = requests.get(url)
 
-#f = open( jsonPrettyFile, 'w', encoding='utf8' )
-#f.write( json.dumps( jsonData, sort_keys=True, indent=2, separators=(',', ':') ) )
-#f.close()
-
-# List of sets, ordered by release date
-#setlist = [ set for set in jsonData ]
-
-# Sort the set by release date
-sortedSetList = sorted( jsonData, key=lambda set: jsonData[set]["releaseDate"] )
-
-#for set in jsonData:
-#    print( dateutil.parser.parse( jsonData[set]["releaseDate"] ).toordinal() )
-
-#print( sortedSetList )
-
-for setcode in sortedSetList:
-    #print( set["code"] )
-    print( jsonData[setcode]['code'] )
-    set = jsonData[setcode]
-
-    if len( set['cards'] ) == 0:
-        continue;
-
-    sortedCards = set['cards']
-
-    if 'number' in sortedCards[0]:
-        sortedCards.sort( key = lambda card: card['number'] )
-    elif 'multiverseid' in sortedCards[0]:
-        sortedCards.sort( key = lambda card: card['multiverseid'] )
-    else:
-        sortedCards.sort( key = lambda card: card['name'] )
+    with open(jsonZip,'wb') as output:
+        output.write(r.content)
     
-    #sorted( set['cards'], key = lambda card: card['number'] if ( 'number' in card ) else card['multiverseid'] if ( 'multiverseid' in card ) else card['name'])
-    for card in sortedCards:
-        print( card['name'] )
+    jsonZip = zipfile.ZipFile(jsonZip)
+    jsonZip.extractall(dataFolder)
+
+
+
+def connect_to_database():
+    
+    conn = psycopg2.connect(options.connection_string)
+    return conn
+
+def update_set_information(json_data, connection):
+    
+    cursor = connection.cursor()
+
+    for set in json_data:
+        print(set[0] + '  ' + set[1]['releaseDate'] )
+
+        cursor.execute(
+        """INSERT INTO spellbook_set (code, name, release_date)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, release_date=EXCLUDED.release_date""",
+        (set[0], set[1]['name'], set[1]['releaseDate']))
+
+    connection.commit()
+    cursor.close()
+
+if __name__ == "__main__":
+    main()
