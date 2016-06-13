@@ -213,3 +213,4 @@ ModelManifest.xml
 /*.sln
 /spellbook/*.pyproj
 data/
+*.pyproj
