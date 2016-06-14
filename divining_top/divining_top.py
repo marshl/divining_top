@@ -30,6 +30,7 @@ def main():
 
     conn = connect_to_database()
 
+    update_block_information(json_data, conn)
     update_set_information(json_data, conn)
 
 def parse_json_data():
@@ -59,21 +60,44 @@ def connect_to_database():
     conn = psycopg2.connect(options.connection_string)
     return conn
 
-def update_set_information(json_data, connection):
+def update_block_information(json_data, connection):
     
+    print( "Updating block information... " )
+
     cursor = connection.cursor()
 
     for set in json_data:
-        print(set[0] + '  ' + set[1]['releaseDate'] )
+
+        if 'block' not in set[1]:
+            continue
 
         cursor.execute(
-        """INSERT INTO spellbook_set (code, name, release_date)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, release_date=EXCLUDED.release_date""",
-        (set[0], set[1]['name'], set[1]['releaseDate']))
+        """INSERT INTO spellbook_block (name, release_date)
+           VALUES (%s, %s)
+           ON CONFLICT (name) DO NOTHING""",
+        (set[1]['block'], set[1]['releaseDate']))
+
+    cursor.close()
+
+    print( "Done\n" )
+
+def update_set_information(json_data, connection):
+    
+    print( "Updating set information... ")
+    cursor = connection.cursor()
+
+    for set in json_data:
+        
+        cursor.execute(
+        """INSERT INTO spellbook_set (code, name, release_date, block_id)
+           VALUES (%s, %s, %s, (SELECT id FROM spellbook_block WHERE name = %s) )
+           ON CONFLICT (code) DO NOTHING""",
+        (set[0], set[1]['name'], set[1]['releaseDate'], set[1].get('block') ))
 
     connection.commit()
     cursor.close()
+
+    print( "Done\n" )
 
 if __name__ == "__main__":
     main()
