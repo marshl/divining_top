@@ -230,23 +230,28 @@ def update_card(card, setcode, cursor):
         'card_name': card['name'],
     }
 
+    # Find whether a card of the given name exists in the database yet
     cursor.execute("""
-SELECT DISTINCT
-c.id card_id,
-cp.id printing_id,
-cpl.id language_id
+SELECT
+  c.id card_id,
+  cp.id printing_id,
+  cpl.id language_id
 FROM spellbook_card c
 JOIN spellbook_cardprinting cp
-ON cp.card_id = c.id
+  ON cp.card_id = c.id
 JOIN spellbook_cardprintinglanguage cpl
-ON cpl.card_printing_id = cp.id
+  ON cpl.card_printing_id = cp.id
 WHERE cpl.language = 'English'
 AND cpl.card_name = %(name)s
+LIMIT 1
 """, {'name': card['name']});
 
     (card_id, printing_id, language_id) = cursor.fetchone() or (None, None, None)
 
+    # If the card does not exist in the database, then the 
     if card_id is None:
+
+        print('Card was not found, inserting new record')
 
         cursor.execute("""
 INSERT INTO spellbook_card (
@@ -282,50 +287,65 @@ INSERT INTO spellbook_card (
 )
 """, card_details)
         cursor.execute("SELECT lastval()")
-        card_id = cursor.fetchone()
+        rows = cursor.fetchone()
+        card_id = rows[0]
+        
+        print('card_id is now {0}'.format(card_id))
 
         printing_details['card_id'] = card_id
 
-        cursor.execute("""
-INSERT INTO spellbook_cardprinting (
-    rarity_id,
-    flavour_text,
-    artist,
-    collector_number,
-    collector_letter,
-    original_text,
-    original_type,
-    card_id,
-    set_id
-) VALUES (
-    ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
-    %(flavour_text)s,
-    %(artist)s,
-    %(collector_number)s,
-    %(collector_letter)s,
-    %(original_text)s,
-    %(original_type)s,
-    %(card_id)s,
-    ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
-)""", printing_details )
+#        cursor.execute("""
+#INSERT INTO spellbook_cardprinting (
+#    rarity_id,
+#    flavour_text,
+#    artist,
+#    collector_number,
+#    collector_letter,
+#    original_text,
+#    original_type,
+#    card_id,
+#    set_id
+#) VALUES (
+#    ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
+#    %(flavour_text)s,
+#    %(artist)s,
+#    %(collector_number)s,
+#    %(collector_letter)s,
+#    %(original_text)s,
+#    %(original_type)s,
+#    %(card_id)s,
+#    ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+#)""", printing_details )
 
-        cursor.execute("SELECT lastval()")
-        printing_id = cursor.fetchone()
+#        cursor.execute("SELECT lastval()")
+#        rows = cursor.fetchone()
+#        printing_id = rows[0]
 
-        language_details['card_printing_id'] = printing_id
+#        print('printing_id is now {0}'.format(printing_id))
 
-        cursor.execute("""
-INSERT INTO spellbook_cardprintinglanguage (
-    language,
-    card_name,
-    card_printing_id
-) VALUES (
-    %(language)s,
-    %(card_name)s,
-    %(card_printing_id)s
-)""", language_details )
+#        language_details['card_printing_id'] = printing_id
+
+#        cursor.execute("""
+#INSERT INTO spellbook_cardprintinglanguage (
+#    language,
+#    card_name,
+#    card_printing_id
+#) VALUES (
+#    %(language)s,
+#    %(card_name)s,
+#    %(card_printing_id)s
+#)""", language_details )
+
+#        cursor.execute("SELECT lastval()")
+#        rows = cursor.fetchone()
+#        language_id = rows[0]
+
+#        print('language_id is now {0}'.format(language_id))
 
     else: # card_id is not None
+
+        print('Card already exists card_id:{0} printing_id:{1} language_id:{2}'.format(card_id, printing_id, language_id))
+
         card_details['card_id'] = card_id
         printing_details['card_id'] = card_id
         cursor.execute("""
@@ -347,7 +367,63 @@ UPDATE spellbook_card SET
 WHERE id = %(card_id)s
 """, card_details)
 
-    #print( card_id or 'blank' )
+
+    cursor.execute("""
+SELECT id
+FROM spellbook_cardprinting
+WHERE card_id = %(card_id)s
+AND set_id = ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+AND collector_number IS NOT DISTINCT FROM %(collector_number)s
+AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
+""", { 'card_id': card_id, 'setcode': setcode, 'collector_number': printing_details['collector_number'], 'collector_letter': printing_details['collector_letter'] } )
+    
+    rows = cursor.fetchone()
+    if rows is not None:
+        printing_id = rows[0]
+    else:
+        printing_id = None
+
+    if printing_id is None:
+
+        print('card printing is new')
+
+        cursor.execute("""
+    INSERT INTO spellbook_cardprinting (
+        rarity_id,
+        flavour_text,
+        artist,
+        collector_number,
+        collector_letter,
+        original_text,
+        original_type,
+        card_id,
+        set_id
+    ) VALUES (
+        ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
+        %(flavour_text)s,
+        %(artist)s,
+        %(collector_number)s,
+        %(collector_letter)s,
+        %(original_text)s,
+        %(original_type)s,
+        %(card_id)s,
+        ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+    )""", printing_details )
+
+        cursor.execute("SELECT lastval()")
+        rows = cursor.fetchone()
+        printing_id = rows[0]
+
+        print('printing_id:{0}'.format(printing_id))
+
+    if card.get('foreignNames') is not None:
+
+        print('card has foreign languages')
+
+        for language in card.get('foreignNames'):
+            create_printing_language_for_card(cursor, language['language'], language['name'], printing_id)
+
+    create_printing_language_for_card(cursor, 'English', card['name'], printing_id)
 
 def get_colour_flags_from_names(colour_names):
     flags = 0;
@@ -355,6 +431,37 @@ def get_colour_flags_from_names(colour_names):
         flags |= colour_name_to_flag[colour.lower()]
 
     return flags
+
+def create_printing_language_for_card(cursor, language, name, printing_id):
+    cursor.execute("""
+SELECT id
+FROM spellbook_cardprintinglanguage
+WHERE card_printing_id = %(printing_id)s
+AND language = %(language)s
+""", { 'language': language, 'name': name, 'printing_id': printing_id } )
+    rows = cursor.fetchone()
+
+    language_id = None
+
+    if rows is not None:
+        language_id = rows[0]
+            
+    if language_id is None:
+
+        print('card language does not exist for {0}'.format(language))
+
+        cursor.execute("""
+INSERT INTO spellbook_cardprintinglanguage (
+    language,
+    card_name,
+    card_printing_id
+) VALUES (
+    %(language)s,
+    %(card_name)s,
+    %(card_printing_id)s
+)""", { 'language': language, 'card_name': name, 'card_printing_id': printing_id } )
+
+        print('language_id is now {0}'.format(language_id))
 
 def get_colour_flags_from_codes(colour_codes):
     flags = 0;
