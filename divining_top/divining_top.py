@@ -5,6 +5,8 @@ import zipfile
 import json
 import requests
 import re
+import queue
+import threading
 from os import path
 
 dataFolder = '../data'
@@ -47,6 +49,11 @@ rarity_name_to_code = {
     'rare': 'R',
     'mythic rare': 'M'
 }
+
+imageDownloadQueueLock = threading.Lock()
+imageDownloadQueue = queue.Queue()
+imageDownloadThreads = []
+imageDownloadExitFlag = False
 
 def main():
     if options.download or not path.isfile(jsonFile):
@@ -515,6 +522,8 @@ def download_image_for_card(multiverse_id):
 
 def download_card_images(connection):
 
+    imageDownloadExitFlag = False
+
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -525,11 +534,26 @@ ORDER BY cpl.multiverse_id
 
     data = cursor.fetchall()
 
+    imageDownloadQueueLock.acquire()
+
     for row in data:
-        download_image_for_card(row[0])
+        imageDownloadQueue.put(row[0])
 
     cursor.close()
+    imageDownloadQueueLock.release()
+    
+    for i in range(1,4):
+        thread = imageDownloadThread(i, imageDownloadQueue)
+        thread.start()
+        imageDownloadThreads.append(thread)
 
+    while not imageDownloadQueue.empty():
+        pass
+    
+    imageDownloadExitFlag = True   
+
+    for t in imageDownloadThreads:
+        t.join()
 
 def get_colour_flags_from_codes(colour_codes):
     flags = 0;
@@ -544,6 +568,22 @@ def convert_to_number(val):
         return match.groups(1)
 
     return 0
+
+class imageDownloadThread(threading.Thread):
+    def __init__(self, threadID, workQueue):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.workQueue = workQueue
+
+    def run(self):
+        while not imageDownloadExitFlag:
+            imageDownloadQueueLock.acquire()
+            if not self.workQueue.empty():
+                multiverse_id = self.workQueue.get()
+                imageDownloadQueueLock.release()
+                download_image_for_card(multiverse_id)
+            else:
+                imageDownloadQueueLock.release()
 
 if __name__ == "__main__":
     main()
