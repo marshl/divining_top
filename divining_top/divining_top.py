@@ -95,6 +95,26 @@ def connect_to_database():
     conn = psycopg2.connect(options.connection_string)
     return conn
 
+def reset_database(connection):
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+TRUNCATE spellbook_card CASCADE;
+ALTER SEQUENCE spellbook_block_id_seq RESTART;
+ALTER SEQUENCE spellbook_card_id_seq RESTART;
+ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
+ALTER SEQUENCE spellbook_cardprinting_id_seq RESTART;
+ALTER SEQUENCE spellbook_cardprintinglanguage_id_seq RESTART;
+ALTER SEQUENCE spellbook_cardruling_id_seq RESTART;
+TRUNCATE spellbook_rarity CASCADE;
+ALTER SEQUENCE spellbook_rarity_id_seq RESTART;
+TRUNCATE spellbook_set CASCADE;
+ALTER SEQUENCE spellbook_set_id_seq RESTART;
+""")
+
+    cursor.close()
+
 def update_rarity_table(connection):
     cursor = connection.cursor()
 
