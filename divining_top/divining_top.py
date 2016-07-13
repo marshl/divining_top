@@ -124,33 +124,33 @@ INSERT INTO spellbook_rarity (
     name,
     display_order
 ) VALUES (
-'L',
-'Basic Land',
-10
+    'L',
+    'Basic Land',
+    10
 ), (
-'C',
-'Common',
-20
+    'C',
+    'Common',
+    20
 ), (
-'U',
-'Uncommon',
-30
+    'U',
+    'Uncommon',
+    30
 ), (
-'R',
-'Rare',
-40
+    'R',
+    'Rare',
+    40
 ), (
-'M',
-'Mythic Rare',
-50
+    'M',
+    'Mythic Rare',
+    50
 ), (
-'T',
-'Timeshifted',
-60
+    'T',
+    'Timeshifted',
+    60
 ), (
-'S',
-'Special',
-70
+    'S',
+    'Special',
+    70
 )
 ON CONFLICT(symbol) DO NOTHING;
 """)
