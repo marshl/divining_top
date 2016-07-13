@@ -8,6 +8,7 @@ import re
 from os import path
 
 dataFolder = '../data'
+image_folder = 'C:/Users/Liam/Projects/sylvan_library/sylvan_library/spellbook/static/card_images/'
 
 parser = OptionParser()
 
@@ -59,16 +60,22 @@ def main():
     
     #return
 
-    conn = connect_to_database()
+    connection = connect_to_database()
 
-    update_rarity_table(conn)
+    download_card_images(connection)
 
-    #update_block_information(json_data, conn)
-    #update_set_information(json_data, conn)
-    update_card_information(json_data, conn)
+    #reset_database(connection)
 
-    conn.commit()
-    conn.close()
+    update_rarity_table(connection)
+
+    update_block_information(json_data, connection)
+    update_set_information(json_data, connection)
+    update_card_information(json_data, connection)
+
+    #download_card_images(connection)
+
+    connection.commit()
+    connection.close()
 
 def parse_json_data():
     f = open( jsonFile, 'r', encoding="utf8" )
@@ -165,6 +172,7 @@ def update_block_information(json_data, connection):
 
     for set in json_data:
 
+        # Ignore sets that have no block
         if 'block' not in set[1]:
             continue
 
@@ -201,17 +209,21 @@ def update_card_information(json_data, connection):
     cursor = connection.cursor()
 
     for set in json_data:
-        
-        for card in set[1]['cards']:
-            
-            print( card['name'] )
 
-            update_card(card, set[0], cursor)
+        #if set[0] != 'ARC':
+        #    continue
+
+        collector_number = 0
+        for card in set[1]['cards']:
+            collector_number += 1
+            update_card(card, set[0], cursor, collector_number)
 
     cursor.close()
     print( "Done." )
 
-def update_card(card, setcode, cursor):
+def update_card(card, setcode, cursor, collector_number):
+
+    print( 'Updating card {0}'.format(card['name']))
 
     card_colour = get_colour_flags_from_names(card['colors']) if card.get('colors') else 0
 
@@ -245,6 +257,12 @@ def update_card(card, setcode, cursor):
         'original_type': card.get('originalType'),
         'setcode': setcode
     }
+
+    #if cnum_match.group('letter'):
+    #    print('hello')
+        
+    #if printing_details['collector_number'] == 10:
+    #    print('argh')
 
     language_details = {
         'language': 'English',
@@ -339,11 +357,12 @@ UPDATE spellbook_card SET
     num_toughness = %(num_toughness)s,
     loyalty =  %(loyalty)s,
     num_loyalty = %(num_loyalty)s,
-    rules_text = %(rules_text)s
+    rules_text = %(rules_text)s,
+    layout = %(layout)s
 WHERE id = %(card_id)s
 """, card_details)
 
-
+    
     cursor.execute("""
 SELECT id
 FROM spellbook_cardprinting
@@ -411,9 +430,16 @@ WHERE id = %(printing_id)s
     if card.get('foreignNames'):
 
         for language in card.get('foreignNames'):
-            create_printing_language_for_card(cursor, language['language'], language['name'], printing_id)
+            language_id = create_printing_language_for_card(cursor, language['language'], language['name'], printing_id, language.get('multiverseid'))
 
-    create_printing_language_for_card(cursor, 'English', card['name'], printing_id)
+            #if language.get('multiverseid'):
+            #    download_image_for_card(language_id, language['multiverseid'])
+
+
+    language_id = create_printing_language_for_card(cursor, 'English', card['name'], printing_id, card.get('multiverseid'))
+
+   # if card.get('multiverseid'):
+   #     download_image_for_card(language_id, card['multiverseid'])
 
 def get_colour_flags_from_names(colour_names):
     flags = 0;
@@ -422,7 +448,8 @@ def get_colour_flags_from_names(colour_names):
 
     return flags
 
-def create_printing_language_for_card(cursor, language, name, printing_id):
+def create_printing_language_for_card(cursor, language, name, printing_id, multiverse_id):
+    
     cursor.execute("""
 SELECT id
 FROM spellbook_cardprintinglanguage
@@ -461,8 +488,48 @@ INSERT INTO spellbook_cardprintinglanguage (
 
     return language_id
 
+def update_ruling_table(connection, json_data):
+    # Unlike the other tables, the rulings table can be safely truncated and rebuilt
+    # This is because there are no other tables that reference the ruling table
+    cursor = connection.cursor()
 
-        print('language_id is now {0}'.format(language_id))
+    cursor.execute("""
+TRUNCATE spellbook_cardruling;
+ALTER SEQUENCE spellbook_ruling_id_sequence RESTART;
+""");
+
+    cursor.close()
+
+def download_image_for_card(multiverse_id):
+    
+    image_path = image_folder + str(multiverse_id) + '.jpg'
+
+    if path.isfile(image_path):
+        return
+
+    base_url = "http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card"
+    stream = requests.get(base_url.format(multiverse_id))
+
+    with open(image_path, 'wb') as output:
+        output.write(stream.content)
+
+def download_card_images(connection):
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+SELECT DISTINCT cpl.multiverse_id
+FROM spellbook_cardprintinglanguage cpl
+ORDER BY cpl.multiverse_id
+    """)
+
+    data = cursor.fetchall()
+
+    for row in data:
+        download_image_for_card(row[0])
+
+    cursor.close()
+
 
 def get_colour_flags_from_codes(colour_codes):
     flags = 0;
