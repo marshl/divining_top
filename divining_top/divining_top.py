@@ -11,7 +11,6 @@ from os import path
 import time
 
 dataFolder = '../data'
-image_folder = 'C:/Users/Liam/Projects/sylvan_library/sylvan_library/spellbook/static/card_images/'
 
 parser = OptionParser()
 
@@ -20,6 +19,12 @@ parser.add_option("-c", "--connection", dest="connection_string",
 
 parser.add_option("-d", "--download", action="store_true", dest="download",
                   help="downloads the json file even if it already exists")
+
+parser.add_option("-i", "--imagedir", dest="image_folder",
+                  help="The location to download the card images to")
+
+parser.add_option("-r", "--reset", dest="reset_database",
+                  help="Whether to reset the database before loading the data")
 
 (options, args) = parser.parse_args()
 
@@ -56,6 +61,10 @@ imageDownloadQueueLock = threading.Lock()
 imageDownloadQueue = queue.Queue()
 imageDownloadThreads = []
 imageDownloadExitFlag = False
+image_download_url = """
+http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card
+"""
+
 
 def main():
 
@@ -66,14 +75,16 @@ def main():
         new_data_file = True
 
     json_data = parse_json_data()
-    
+
     if new_data_file:
         pretty_print_json_data(json_data)
-    
+
     connection = connect_to_database()
 
-    #reset_database(connection)
-    #update_rarity_table(connection)
+    if reset_database:
+        reset_database(connection)
+
+    update_rarity_table(connection)
 
     update_block_information(json_data, connection)
     update_set_information(json_data, connection)
@@ -83,39 +94,49 @@ def main():
 
     connection.commit()
 
-    download_card_images(connection)
+    if options.image_folder:
+        download_card_images(connection)
 
     connection.close()
+
 
 def parse_json_data():
     f = open(json_data_file, 'r', encoding="utf8")
     json_data = json.load(f, encoding='UTF-8')
     f.close()
 
-    json_data = sorted(json_data.items(), key=lambda set: set[1]["releaseDate"])
+    json_data = sorted(json_data.items(),
+                       key=lambda set: set[1]["releaseDate"])
 
     return json_data
 
+
 def pretty_print_json_data(json_data):
     f = open(pretty_json_file, 'w', encoding='utf8')
-    f.write(json.dumps(json_data, sort_keys=True, indent=2, separators=(',', ':')))
+    f.write(json.dumps(json_data,
+                       sort_keys=True,
+                       indent=2,
+                       separators=(',', ':')))
     f.close()
 
+
 def download_json_data():
-      
+
     url = "http://mtgjson.com/json/AllSets-x.json.zip"
     r = requests.get(url)
 
-    with open(json_zip_file,'wb') as output:
+    with open(json_zip_file, 'wb') as output:
         output.write(r.content)
-    
+
     zip = zipfile.ZipFile(json_zip_file)
     zip.extractall(dataFolder)
 
+
 def connect_to_database():
-    
+
     conn = psycopg2.connect(options.connection_string)
     return conn
+
 
 def reset_database(connection):
 
@@ -136,6 +157,7 @@ ALTER SEQUENCE spellbook_set_id_seq RESTART;
 """)
 
     cursor.close()
+
 
 def update_rarity_table(connection):
     cursor = connection.cursor()
@@ -179,8 +201,9 @@ ON CONFLICT(symbol) DO NOTHING;
 
     cursor.close()
 
+
 def update_block_information(json_data, connection):
-    
+
     print("Updating block information... ")
 
     cursor = connection.cursor()
@@ -195,24 +218,27 @@ def update_block_information(json_data, connection):
 INSERT INTO spellbook_block (
     name,
     release_date
-) VALUES 
-    %(block_name)s, 
+) VALUES (
+    %(block_name)s,
     %(release_date)s
-) ON CONFLICT (name) 
-UPDATE SET release_date = MIN(release_date, EXCLUDED.release_date)
-""", { 'block_name': set[1]['block'], 'release_date': set[1]['releaseDate'] })
+) ON CONFLICT (name) DO NOTHING
+        """, {
+        'block_name': set[1]['block'],
+        'release_date': set[1]['releaseDate']
+        })
 
     cursor.close()
 
     print("Done\n")
 
+
 def update_set_information(json_data, connection):
-    
+
     print("Updating set information... ")
     cursor = connection.cursor()
 
     for set in json_data:
-        
+
         cursor.execute("""
 INSERT INTO spellbook_set (
     code,
@@ -224,12 +250,17 @@ INSERT INTO spellbook_set (
     %(set_name)s,
     %(release_date)s,
     (SELECT id FROM spellbook_block WHERE name = %(block_name)s)
-) ON CONFLICT (code) DO NOTHING""",
-        { 'set_code': set[0], 'set_name': set[1]['name'], 'release_date': set[1]['releaseDate'], 'block_name': set[1].get('block') })
+) ON CONFLICT (code) DO NOTHING""", {
+            'set_code': set[0],
+            'set_name': set[1]['name'],
+            'release_date': set[1]['releaseDate'],
+            'block_name': set[1].get('block')
+        })
 
     cursor.close()
 
     print("Done\n")
+
 
 def update_card_information(json_data, connection):
 
@@ -237,9 +268,6 @@ def update_card_information(json_data, connection):
     cursor = connection.cursor()
 
     for set in json_data:
-
-        #if set[0] != 'ARC':
-        #    continue
 
         collector_number = 0
         for card in set[1]['cards']:
@@ -249,48 +277,75 @@ def update_card_information(json_data, connection):
     cursor.close()
     print("Done.")
 
+
 def update_card(card, setcode, cursor, collector_number):
 
     print('Updating card {0}'.format(card['name']))
 
-    card_colour = get_colour_flags_from_names(card['colors']) if card.get('colors') else 0
+    card_colour = 0
+    if card.get('colors'):
+        card_colour = get_colour_flags_from_names(card['colors'])
 
     card_details = {
         'cost': card.get('manaCost'),
         'cmc': card.get('cmc') or 0,
         'colour': card_colour,
-        'colour_identity': get_colour_flags_from_codes(card['colorIdentity']) if card.get('colourIdentity') else 0,
+        'colour_identity':
+            get_colour_flags_from_codes(card['colorIdentity'])
+            if card.get('colourIdentity')
+            else 0,
         'colour_count': bin(card_colour).count('1'),
-        'type': ' '.join(card.get('types')) if card.get('types') else None,
-        'subtype': ' '.join(card.get('subtypes')) if card.get('subtypes') else None,
+        'type':
+            ' '.join(card.get('types'))
+            if card.get('types')
+            else None,
+        'subtype':
+            ' '.join(card.get('subtypes'))
+            if card.get('subtypes')
+            else None,
         'power': card.get('power'),
-        'num_power': convert_to_number(card.get('power')) if card.get('power') else 0,
+        'num_power':
+            convert_to_number(card.get('power'))
+            if card.get('power')
+            else 0,
         'toughness': card.get('toughness'),
-        'num_toughness': convert_to_number(card.get('toughness')) if card.get('toughness') else 0,
+        'num_toughness': convert_to_number(card.get('toughness'))
+            if card.get('toughness')
+            else 0,
         'loyalty': card.get('loyalty'),
-        'num_loyalty': convert_to_number(card.get('loyalty')) if card.get('loyalty') else 0,
+        'num_loyalty': convert_to_number(card.get('loyalty'))
+            if card.get('loyalty')
+            else 0,
         'rules_text': card.get('text'),
         'layout': card.get('layout') or 'normal'
     }
 
-    cnum_match = re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$', card['number']) if card.get('number') else None
+    cnum_match = None
+    if card.get('number'):
+        re.search(
+            '^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
+            card['number']
+        )
 
     printing_details = {
-        'rarity': 'Timeshifted' if card.get('timeshifted') and card['timeshifted'] else card.get('rarity'),
+        'rarity':
+            'Timeshifted'
+            if card.get('timeshifted') and card['timeshifted']
+            else card.get('rarity'),
         'flavour_text': card.get('flavor'),
         'artist': card['artist'],
-        'collector_number': cnum_match.group('number') if cnum_match else collector_number,
-        'collector_letter': cnum_match.group('special') or cnum_match.group('letter') if cnum_match else None,
+        'collector_number':
+            cnum_match.group('number')
+            if cnum_match
+            else collector_number,
+        'collector_letter':
+            cnum_match.group('special') or cnum_match.group('letter')
+            if cnum_match
+            else None,
         'original_text': card.get('originalText'),
         'original_type': card.get('originalType'),
         'setcode': setcode
     }
-
-    #if cnum_match.group('letter'):
-    #    print('hello')
-        
-    #if printing_details['collector_number'] == 10:
-    #    print('argh')
 
     language_details = {
         'language': 'English',
@@ -299,7 +354,7 @@ def update_card(card, setcode, cursor, collector_number):
 
     # Find whether a card of the given name exists in the database yet
     cursor.execute("""
-SELECT DISTINCT 
+SELECT DISTINCT
   c.id card_id
 FROM spellbook_card c
 JOIN spellbook_cardprinting cp
@@ -359,12 +414,12 @@ INSERT INTO spellbook_card (
         cursor.execute("SELECT lastval()")
         rows = cursor.fetchone()
         (card_id) = rows[0]
-        
+
         printing_details['card_id'] = card_id
 
         print('Inserted new card record {0}'.format(card_id))
 
-    else: # card_id is not None
+    else:  # card_id is not None
 
         print('Updating card record {0}'.format(card_id))
 
@@ -390,7 +445,6 @@ UPDATE spellbook_card SET
 WHERE id = %(card_id)s
         """, card_details)
 
-    
     cursor.execute("""
 SELECT id
 FROM spellbook_cardprinting
@@ -398,8 +452,13 @@ WHERE card_id = %(card_id)s
 AND set_id = ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
 AND collector_number = %(collector_number)s
 AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
-    """, { 'card_id': card_id, 'setcode': setcode, 'collector_number': printing_details['collector_number'], 'collector_letter': printing_details['collector_letter'] })
-    
+    """, {
+            'card_id': card_id,
+            'setcode': setcode,
+            'collector_number': printing_details['collector_number'],
+            'collector_letter': printing_details['collector_letter']
+        })
+
     assert(cursor.rowcount < 2)
 
     rows = cursor.fetchone()
@@ -459,16 +518,19 @@ WHERE id = %(printing_id)s
     if card.get('foreignNames'):
 
         for language in card.get('foreignNames'):
-            language_id = create_printing_language_for_card(cursor, language['language'], language['name'], printing_id, language.get('multiverseid'))
+            language_id = create_card_language(cursor,
+                                               language['language'],
+                                               language['name'],
+                                               printing_id,
+                                               language.get('multiverseid'))
 
-            #if language.get('multiverseid'):
-            #    download_image_for_card(language_id, language['multiverseid'])
+    language_id = create_card_language(cursor,
+                                       'English',
+                                       card['name'],
+                                       printing_id,
+                                       card.get('multiverseid'))
 
 
-    language_id = create_printing_language_for_card(cursor, 'English', card['name'], printing_id, card.get('multiverseid'))
-
-   # if card.get('multiverseid'):
-   #     download_image_for_card(language_id, card['multiverseid'])
 def get_colour_flags_from_names(colour_names):
     flags = 0
     for colour in colour_names:
@@ -476,14 +538,19 @@ def get_colour_flags_from_names(colour_names):
 
     return flags
 
-def create_printing_language_for_card(cursor, language, name, printing_id, multiverse_id):
-    
+
+def create_card_language(cursor, language, name, printing_id, multiverse_id):
+
     cursor.execute("""
 SELECT id
 FROM spellbook_cardprintinglanguage
 WHERE card_printing_id = %(printing_id)s
 AND language = %(language)s
-""", { 'language': language, 'name': name, 'printing_id': printing_id })
+""", {
+        'language': language,
+        'name': name,
+        'printing_id': printing_id
+    })
     rows = cursor.fetchone()
 
     language_id = None
@@ -491,9 +558,9 @@ AND language = %(language)s
     if rows is not None:
         language_id = rows[0]
 
-        print('Language already exists for {0} {1}'.format(language, language_id))
-        return language_id    
-
+        print('Language already exists for {0} {1}'.format(language,
+                                                           language_id))
+        return language_id
 
     cursor.execute("""
 INSERT INTO spellbook_cardprintinglanguage (
@@ -506,7 +573,12 @@ INSERT INTO spellbook_cardprintinglanguage (
     %(card_name)s,
     %(card_printing_id)s,
     %(multiverse_id)s
-)""", { 'language': language, 'card_name': name, 'card_printing_id': printing_id, 'multiverse_id': multiverse_id })
+)""", {
+        'language': language,
+        'card_name': name,
+        'card_printing_id': printing_id,
+        'multiverse_id': multiverse_id
+    })
 
     cursor.execute("SELECT lastval()")
     rows = cursor.fetchone()
@@ -515,6 +587,7 @@ INSERT INTO spellbook_cardprintinglanguage (
     print('Inserted card language for {0} {1}'.format(language, language_id))
 
     return language_id
+
 
 def update_ruling_table(json_data, connection):
 
@@ -530,7 +603,7 @@ ALTER SEQUENCE spellbook_cardruling_id_seq RESTART;
     for set in json_data:
 
         for card in set[1]['cards']:
-            
+
             # Skip cards that don't have additional names (links to other
             # cards)
             if not card.get('rulings'):
@@ -555,17 +628,21 @@ INSERT INTO spellbook_cardruling (
         AND cpl.language = 'English'
     )
 ) ON CONFLICT (date, text, card_id) DO NOTHING
-                """, {'card_name': card['name'], 'ruling_date': ruling['date'], 'ruling_text': ruling['text'] })
+                """, {
+                    'card_name': card['name'],
+                    'ruling_date': ruling['date'],
+                    'ruling_text': ruling['text']
+                })
 
     cursor.close()
 
-    
+
 def update_card_link_information(json_data, connection):
 
     cursor = connection.cursor()
 
-     # The card link table can be safely truncated and rebuilt because there
-     # are no other tables that reference it
+    # The card link table can be safely truncated and rebuilt because there
+    # are no other tables that reference it
     cursor.execute("""
 TRUNCATE spellbook_cardlink;
 ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
@@ -574,9 +651,9 @@ ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
     for set in json_data:
 
         for card in set[1]['cards']:
-            
-            # Skip cards that don't have additional names (links to other
-            # cards)
+
+            # Skip cards that don't have additional names
+            # (links to other cards)
             if not card.get('names'):
                 continue
 
@@ -585,7 +662,7 @@ ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
                 # Skip the name of the card itself
                 if link_name == card['name']:
                     continue
-                
+
                 cursor.execute("""
 INSERT INTO spellbook_cardlink (
     card_from_id,
@@ -596,7 +673,7 @@ INSERT INTO spellbook_cardlink (
         FROM spellbook_cardprinting cp
         JOIN spellbook_cardprintinglanguage cpl
         ON cpl.card_printing_id = cp.id
-        AND cpl.language = 'English' 
+        AND cpl.language = 'English'
         AND cpl.card_name = %(card_from_name)s
     ),
     (
@@ -604,26 +681,29 @@ INSERT INTO spellbook_cardlink (
         FROM spellbook_cardprinting cp
         JOIN spellbook_cardprintinglanguage cpl
         ON cpl.card_printing_id = cp.id
-        AND cpl.language = 'English' 
+        AND cpl.language = 'English'
         AND cpl.card_name = %(card_to_name)s
     )
 ) ON CONFLICT (card_from_id, card_to_id) DO NOTHING
-                """, {'card_from_name': card['name'], 'card_to_name': link_name })
+                """, {
+                    'card_from_name': card['name'],
+                    'card_to_name': link_name
+                })
 
     cursor.close()
 
 
 def download_image_for_card(multiverse_id):
-    
+
     image_path = image_folder + str(multiverse_id) + '.jpg'
 
     print('Downloading {0}'.format(multiverse_id))
 
-    base_url = "http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card"
-    stream = requests.get(base_url.format(multiverse_id))
+    stream = requests.get(image_download_url.format(multiverse_id))
 
     with open(image_path, 'wb') as output:
         output.write(stream.content)
+
 
 def download_card_images(connection):
 
@@ -654,19 +734,20 @@ ORDER BY cpl.multiverse_id
 
     cursor.close()
     imageDownloadQueueLock.release()
-    
-    for i in range(1,8):
+
+    for i in range(1, 8):
         thread = imageDownloadThread(i)
         thread.start()
         imageDownloadThreads.append(thread)
 
     while not imageDownloadQueue.empty():
         pass
-    
-    imageDownloadExitFlag = True   
+
+    imageDownloadExitFlag = True
 
     for t in imageDownloadThreads:
         t.join()
+
 
 def get_colour_flags_from_codes(colour_codes):
     flags = 0
@@ -675,12 +756,14 @@ def get_colour_flags_from_codes(colour_codes):
 
     return flags
 
+
 def convert_to_number(val):
     match = re.search('([\d.]+)', str(val))
     if match:
         return match.groups(1)
 
     return 0
+
 
 class imageDownloadThread(threading.Thread):
     def __init__(self, threadID):
@@ -698,6 +781,7 @@ class imageDownloadThread(threading.Thread):
                 imageDownloadQueueLock.release()
 
             time.sleep(1)
+
 
 if __name__ == "__main__":
     main()
