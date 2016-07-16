@@ -78,6 +78,7 @@ def main():
     update_block_information(json_data, connection)
     update_set_information(json_data, connection)
     update_card_information(json_data, connection)
+    update_card_link_information(json_data, connection)
 
     connection.commit()
 
@@ -512,6 +513,57 @@ ALTER SEQUENCE spellbook_ruling_id_sequence RESTART;
 """);
 
     cursor.close()
+
+    
+def update_card_link_information(json_data, connection):
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+TRUNCATE spellbook_cardlink;
+ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
+""")
+
+    for set in json_data:
+
+        for card in set[1]['cards']:
+            
+            # Skip cards that don't have additional names (links to other cards)
+            if not card.get('names'):
+                continue
+
+            for link_name in card['names']:
+
+                # Skip the name of the card itself
+                if link_name == card['name']:
+                    continue
+                
+                cursor.execute("""
+INSERT INTO spellbook_cardlink (
+    card_from_id,
+    card_to_id
+) VALUES (
+    (
+        SELECT DISTINCT cp.card_id
+        FROM spellbook_cardprinting cp
+        JOIN spellbook_cardprintinglanguage cpl
+        ON cpl.card_printing_id = cp.id
+        AND cpl.language = 'English' 
+        AND cpl.card_name = %(card_from_name)s
+    ),
+    (
+        SELECT DISTINCT cp.card_id
+        FROM spellbook_cardprinting cp
+        JOIN spellbook_cardprintinglanguage cpl
+        ON cpl.card_printing_id = cp.id
+        AND cpl.language = 'English' 
+        AND cpl.card_name = %(card_to_name)s
+    )
+) ON CONFLICT (card_from_id, card_to_id) DO NOTHING
+                """, {'card_from_name': card['name'], 'card_to_name': link_name } )
+
+    cursor.close()
+
 
 def download_image_for_card(multiverse_id):
     
