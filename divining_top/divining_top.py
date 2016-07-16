@@ -8,6 +8,7 @@ import re
 import queue
 import threading
 from os import path
+import time
 
 dataFolder = '../data'
 image_folder = 'C:/Users/Liam/Projects/sylvan_library/sylvan_library/spellbook/static/card_images/'
@@ -22,8 +23,9 @@ parser.add_option("-d", "--download", action="store_true", dest="download",
 
 (options, args) = parser.parse_args()
 
-jsonZip = path.join( dataFolder, 'AllSets-x.json.zip' )
-jsonFile = path.join( dataFolder, 'AllSets-x.json' )
+json_zip_file = path.join( dataFolder, 'AllSets-x.json.zip' )
+json_data_file = path.join( dataFolder, 'AllSets-x.json' )
+pretty_json_file = path.join( dataFolder, 'AllSets-x-pretty.json' )
 jsonPrettyFile = path.join( dataFolder, 'AllSets-x-pretty.json' )
 
 colour_name_to_flag = {
@@ -56,36 +58,35 @@ imageDownloadThreads = []
 imageDownloadExitFlag = False
 
 def main():
-    if options.download or not path.isfile(jsonFile):
+
+    new_data_file = False
+
+    if options.download or not path.isfile(json_data_file):
         download_json_data()
+        new_data_file = True
 
     json_data = parse_json_data()
     
-    # f = open( 'AllSets-x-pretty.json', 'w', encoding='utf8' )
-    # f.write( json.dumps( json_data, sort_keys=True, indent=2, separators=(',', ':') ) )
-    # f.close()
+    if new_data_file:
+        pretty_print_json_data(json_data)
     
-    #return
-
     connection = connect_to_database()
 
-    download_card_images(connection)
-
     #reset_database(connection)
-
-    update_rarity_table(connection)
+    #update_rarity_table(connection)
 
     update_block_information(json_data, connection)
     update_set_information(json_data, connection)
     update_card_information(json_data, connection)
 
-    #download_card_images(connection)
-
     connection.commit()
+
+    download_card_images(connection)
+
     connection.close()
 
 def parse_json_data():
-    f = open( jsonFile, 'r', encoding="utf8" )
+    f = open( json_data_file, 'r', encoding="utf8" )
     json_data = json.load( f, encoding='UTF-8' )
     f.close()
 
@@ -93,16 +94,21 @@ def parse_json_data():
 
     return json_data
 
+def pretty_print_json_data(json_data):
+    f = open(pretty_json_file, 'w', encoding='utf8' )
+    f.write( json.dumps( json_data, sort_keys=True, indent=2, separators=(',', ':') ) )
+    f.close()
+
 def download_json_data():
       
     url = "http://mtgjson.com/json/AllSets-x.json.zip"
     r = requests.get(url)
 
-    with open(jsonZip,'wb') as output:
+    with open(json_zip_file,'wb') as output:
         output.write(r.content)
     
-    jsonZip = zipfile.ZipFile(jsonZip)
-    jsonZip.extractall(dataFolder)
+    zip = zipfile.ZipFile(json_zip_file)
+    zip.extractall(dataFolder)
 
 def connect_to_database():
     
@@ -511,8 +517,11 @@ def download_image_for_card(multiverse_id):
     
     image_path = image_folder + str(multiverse_id) + '.jpg'
 
-    if path.isfile(image_path):
-        return
+    #if path.isfile(image_path):
+        #print('Skipping {0}'.format(multiverse_id))
+    #    return
+
+    print('Downloading {0}'.format(multiverse_id))
 
     base_url = "http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card"
     stream = requests.get(base_url.format(multiverse_id))
@@ -529,6 +538,7 @@ def download_card_images(connection):
     cursor.execute("""
 SELECT DISTINCT cpl.multiverse_id
 FROM spellbook_cardprintinglanguage cpl
+WHERE cpl.multiverse_id IS NOT NULL
 ORDER BY cpl.multiverse_id
     """)
 
@@ -537,13 +547,20 @@ ORDER BY cpl.multiverse_id
     imageDownloadQueueLock.acquire()
 
     for row in data:
-        imageDownloadQueue.put(row[0])
+        multiverse_id = row[0]
+        image_path = image_folder + str(multiverse_id) + '.jpg'
+
+        if path.exists(image_path):
+            print('Skipping {0}'.format(multiverse_id))
+            continue
+
+        imageDownloadQueue.put(multiverse_id)
 
     cursor.close()
     imageDownloadQueueLock.release()
     
-    for i in range(1,4):
-        thread = imageDownloadThread(i, imageDownloadQueue)
+    for i in range(1,8):
+        thread = imageDownloadThread(i)
         thread.start()
         imageDownloadThreads.append(thread)
 
@@ -570,20 +587,21 @@ def convert_to_number(val):
     return 0
 
 class imageDownloadThread(threading.Thread):
-    def __init__(self, threadID, workQueue):
+    def __init__(self, threadID):
         threading.Thread.__init__(self)
         self.threadID = threadID
-        self.workQueue = workQueue
 
     def run(self):
         while not imageDownloadExitFlag:
             imageDownloadQueueLock.acquire()
-            if not self.workQueue.empty():
-                multiverse_id = self.workQueue.get()
+            if not imageDownloadQueue.empty():
+                multiverse_id = imageDownloadQueue.get()
                 imageDownloadQueueLock.release()
                 download_image_for_card(multiverse_id)
             else:
                 imageDownloadQueueLock.release()
+
+            time.sleep(1)
 
 if __name__ == "__main__":
     main()
