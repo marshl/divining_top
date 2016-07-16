@@ -23,10 +23,10 @@ parser.add_option("-d", "--download", action="store_true", dest="download",
 
 (options, args) = parser.parse_args()
 
-json_zip_file = path.join( dataFolder, 'AllSets-x.json.zip' )
-json_data_file = path.join( dataFolder, 'AllSets-x.json' )
-pretty_json_file = path.join( dataFolder, 'AllSets-x-pretty.json' )
-jsonPrettyFile = path.join( dataFolder, 'AllSets-x-pretty.json' )
+json_zip_file = path.join(dataFolder, 'AllSets-x.json.zip')
+json_data_file = path.join(dataFolder, 'AllSets-x.json')
+pretty_json_file = path.join(dataFolder, 'AllSets-x-pretty.json')
+jsonPrettyFile = path.join(dataFolder, 'AllSets-x-pretty.json')
 
 colour_name_to_flag = {
     'white': 1,
@@ -88,17 +88,17 @@ def main():
     connection.close()
 
 def parse_json_data():
-    f = open( json_data_file, 'r', encoding="utf8" )
-    json_data = json.load( f, encoding='UTF-8' )
+    f = open(json_data_file, 'r', encoding="utf8")
+    json_data = json.load(f, encoding='UTF-8')
     f.close()
 
-    json_data = sorted( json_data.items(), key=lambda set: set[1]["releaseDate"] )
+    json_data = sorted(json_data.items(), key=lambda set: set[1]["releaseDate"])
 
     return json_data
 
 def pretty_print_json_data(json_data):
-    f = open(pretty_json_file, 'w', encoding='utf8' )
-    f.write( json.dumps( json_data, sort_keys=True, indent=2, separators=(',', ':') ) )
+    f = open(pretty_json_file, 'w', encoding='utf8')
+    f.write(json.dumps(json_data, sort_keys=True, indent=2, separators=(',', ':')))
     f.close()
 
 def download_json_data():
@@ -181,7 +181,7 @@ ON CONFLICT(symbol) DO NOTHING;
 
 def update_block_information(json_data, connection):
     
-    print( "Updating block information... " )
+    print("Updating block information... ")
 
     cursor = connection.cursor()
 
@@ -191,36 +191,49 @@ def update_block_information(json_data, connection):
         if 'block' not in set[1]:
             continue
 
-        cursor.execute(
-        """INSERT INTO spellbook_block (name, release_date)
-           VALUES (%s, %s)
-           ON CONFLICT (name) DO NOTHING""",
-        (set[1]['block'], set[1]['releaseDate']))
+        cursor.execute("""
+INSERT INTO spellbook_block (
+    name,
+    release_date
+) VALUES 
+    %(block_name)s, 
+    %(release_date)s
+) ON CONFLICT (name) 
+UPDATE SET release_date = MIN(release_date, EXCLUDED.release_date)
+""", { 'block_name': set[1]['block'], 'release_date': set[1]['releaseDate'] })
 
     cursor.close()
 
-    print( "Done\n" )
+    print("Done\n")
 
 def update_set_information(json_data, connection):
     
-    print( "Updating set information... ")
+    print("Updating set information... ")
     cursor = connection.cursor()
 
     for set in json_data:
         
-        cursor.execute(
-        """INSERT INTO spellbook_set (code, name, release_date, block_id)
-           VALUES (%s, %s, %s, (SELECT id FROM spellbook_block WHERE name = %s) )
-           ON CONFLICT (code) DO NOTHING""",
-        (set[0], set[1]['name'], set[1]['releaseDate'], set[1].get('block') ))
+        cursor.execute("""
+INSERT INTO spellbook_set (
+    code,
+    name,
+    release_date,
+    block_id
+) VALUES (
+    %(set_code)s,
+    %(set_name)s,
+    %(release_date)s,
+    (SELECT id FROM spellbook_block WHERE name = %(block_name)s)
+) ON CONFLICT (code) DO NOTHING""",
+        { 'set_code': set[0], 'set_name': set[1]['name'], 'release_date': set[1]['releaseDate'], 'block_name': set[1].get('block') })
 
     cursor.close()
 
-    print( "Done\n" )
+    print("Done\n")
 
 def update_card_information(json_data, connection):
 
-    print( "Updating card information... ", end="" )
+    print("Updating card information... ", end="")
     cursor = connection.cursor()
 
     for set in json_data:
@@ -234,11 +247,11 @@ def update_card_information(json_data, connection):
             update_card(card, set[0], cursor, collector_number)
 
     cursor.close()
-    print( "Done." )
+    print("Done.")
 
 def update_card(card, setcode, cursor, collector_number):
 
-    print( 'Updating card {0}'.format(card['name']))
+    print('Updating card {0}'.format(card['name']))
 
     card_colour = get_colour_flags_from_names(card['colors']) if card.get('colors') else 0
 
@@ -248,8 +261,8 @@ def update_card(card, setcode, cursor, collector_number):
         'colour': card_colour,
         'colour_identity': get_colour_flags_from_codes(card['colorIdentity']) if card.get('colourIdentity') else 0,
         'colour_count': bin(card_colour).count('1'),
-        'type': ' '.join( card.get('types') ) if card.get('types') else None,
-        'subtype': ' '.join( card.get('subtypes') ) if card.get('subtypes') else None,
+        'type': ' '.join(card.get('types')) if card.get('types') else None,
+        'subtype': ' '.join(card.get('subtypes')) if card.get('subtypes') else None,
         'power': card.get('power'),
         'num_power': convert_to_number(card.get('power')) if card.get('power') else 0,
         'toughness': card.get('toughness'),
@@ -260,7 +273,7 @@ def update_card(card, setcode, cursor, collector_number):
         'layout': card.get('layout') or 'normal'
     }
 
-    cnum_match = re.search( '^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$', card['number'] ) if card.get('number') else None
+    cnum_match = re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$', card['number']) if card.get('number') else None
 
     printing_details = {
         'rarity': 'Timeshifted' if card.get('timeshifted') and card['timeshifted'] else card.get('rarity'),
@@ -295,16 +308,16 @@ JOIN spellbook_cardprintinglanguage cpl
   ON cpl.card_printing_id = cp.id
 WHERE cpl.language = 'English'
 AND cpl.card_name = %(name)s
-""", {'name': card['name']});
+    """, {'name': card['name']})
 
-    assert( cursor.rowcount < 2);
+    assert(cursor.rowcount < 2)
 
     rows = cursor.fetchone()
     card_id = None
     if rows is not None:
         card_id = rows[0]
 
-    # If the card does not exist in the database, then the 
+    # If the card does not exist in the database, then the
     if card_id is None:
 
         cursor.execute("""
@@ -341,7 +354,7 @@ INSERT INTO spellbook_card (
     %(rules_text)s,
     %(layout)s
 )
-""", card_details)
+        """, card_details)
 
         cursor.execute("SELECT lastval()")
         rows = cursor.fetchone()
@@ -375,7 +388,7 @@ UPDATE spellbook_card SET
     rules_text = %(rules_text)s,
     layout = %(layout)s
 WHERE id = %(card_id)s
-""", card_details)
+        """, card_details)
 
     
     cursor.execute("""
@@ -385,7 +398,7 @@ WHERE card_id = %(card_id)s
 AND set_id = ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
 AND collector_number = %(collector_number)s
 AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
-""", { 'card_id': card_id, 'setcode': setcode, 'collector_number': printing_details['collector_number'], 'collector_letter': printing_details['collector_letter'] } )
+    """, { 'card_id': card_id, 'setcode': setcode, 'collector_number': printing_details['collector_number'], 'collector_letter': printing_details['collector_letter'] })
     
     assert(cursor.rowcount < 2)
 
@@ -399,27 +412,28 @@ AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
     if printing_id is None:
 
         cursor.execute("""
-    INSERT INTO spellbook_cardprinting (
-        rarity_id,
-        flavour_text,
-        artist,
-        collector_number,
-        collector_letter,
-        original_text,
-        original_type,
-        card_id,
-        set_id
-    ) VALUES (
-        ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
-        %(flavour_text)s,
-        %(artist)s,
-        %(collector_number)s,
-        %(collector_letter)s,
-        %(original_text)s,
-        %(original_type)s,
-        %(card_id)s,
-        ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
-    )""", printing_details )
+INSERT INTO spellbook_cardprinting (
+    rarity_id,
+    flavour_text,
+    artist,
+    collector_number,
+    collector_letter,
+    original_text,
+    original_type,
+    card_id,
+    set_id
+) VALUES (
+    ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
+    %(flavour_text)s,
+    %(artist)s,
+    %(collector_number)s,
+    %(collector_letter)s,
+    %(original_text)s,
+    %(original_type)s,
+    %(card_id)s,
+    ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+)
+        """, printing_details)
 
         cursor.execute("SELECT lastval()")
         rows = cursor.fetchone()
@@ -455,9 +469,8 @@ WHERE id = %(printing_id)s
 
    # if card.get('multiverseid'):
    #     download_image_for_card(language_id, card['multiverseid'])
-
 def get_colour_flags_from_names(colour_names):
-    flags = 0;
+    flags = 0
     for colour in colour_names:
         flags |= colour_name_to_flag[colour.lower()]
 
@@ -470,7 +483,7 @@ SELECT id
 FROM spellbook_cardprintinglanguage
 WHERE card_printing_id = %(printing_id)s
 AND language = %(language)s
-""", { 'language': language, 'name': name, 'printing_id': printing_id } )
+""", { 'language': language, 'name': name, 'printing_id': printing_id })
     rows = cursor.fetchone()
 
     language_id = None
@@ -493,7 +506,7 @@ INSERT INTO spellbook_cardprintinglanguage (
     %(card_name)s,
     %(card_printing_id)s,
     %(multiverse_id)s
-)""", { 'language': language, 'card_name': name, 'card_printing_id': printing_id, 'multiverse_id': multiverse_id } )
+)""", { 'language': language, 'card_name': name, 'card_printing_id': printing_id, 'multiverse_id': multiverse_id })
 
     cursor.execute("SELECT lastval()")
     rows = cursor.fetchone()
@@ -505,7 +518,8 @@ INSERT INTO spellbook_cardprintinglanguage (
 
 def update_ruling_table(json_data, connection):
 
-    # The rulings table can be safely truncated and rebuilt because there are no other tables that reference it
+    # The rulings table can be safely truncated and rebuilt because there are
+    # no other tables that reference it
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -517,7 +531,8 @@ ALTER SEQUENCE spellbook_cardruling_id_seq RESTART;
 
         for card in set[1]['cards']:
             
-            # Skip cards that don't have additional names (links to other cards)
+            # Skip cards that don't have additional names (links to other
+            # cards)
             if not card.get('rulings'):
                 continue
 
@@ -540,7 +555,7 @@ INSERT INTO spellbook_cardruling (
         AND cpl.language = 'English'
     )
 ) ON CONFLICT (date, text, card_id) DO NOTHING
-                """, {'card_name': card['name'], 'ruling_date': ruling['date'], 'ruling_text': ruling['text'] } )
+                """, {'card_name': card['name'], 'ruling_date': ruling['date'], 'ruling_text': ruling['text'] })
 
     cursor.close()
 
@@ -549,6 +564,8 @@ def update_card_link_information(json_data, connection):
 
     cursor = connection.cursor()
 
+     # The card link table can be safely truncated and rebuilt because there
+     # are no other tables that reference it
     cursor.execute("""
 TRUNCATE spellbook_cardlink;
 ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
@@ -558,7 +575,8 @@ ALTER SEQUENCE spellbook_cardlink_id_seq RESTART;
 
         for card in set[1]['cards']:
             
-            # Skip cards that don't have additional names (links to other cards)
+            # Skip cards that don't have additional names (links to other
+            # cards)
             if not card.get('names'):
                 continue
 
@@ -590,7 +608,7 @@ INSERT INTO spellbook_cardlink (
         AND cpl.card_name = %(card_to_name)s
     )
 ) ON CONFLICT (card_from_id, card_to_id) DO NOTHING
-                """, {'card_from_name': card['name'], 'card_to_name': link_name } )
+                """, {'card_from_name': card['name'], 'card_to_name': link_name })
 
     cursor.close()
 
@@ -598,10 +616,6 @@ INSERT INTO spellbook_cardlink (
 def download_image_for_card(multiverse_id):
     
     image_path = image_folder + str(multiverse_id) + '.jpg'
-
-    #if path.isfile(image_path):
-        #print('Skipping {0}'.format(multiverse_id))
-    #    return
 
     print('Downloading {0}'.format(multiverse_id))
 
@@ -655,14 +669,14 @@ ORDER BY cpl.multiverse_id
         t.join()
 
 def get_colour_flags_from_codes(colour_codes):
-    flags = 0;
+    flags = 0
     for colour in colour_codes:
         flags |= colour_code_to_flag[colour.lower()]
 
     return flags
 
 def convert_to_number(val):
-    match = re.search( '([\d.]+)', str(val) )
+    match = re.search('([\d.]+)', str(val))
     if match:
         return match.groups(1)
 
