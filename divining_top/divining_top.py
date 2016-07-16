@@ -79,6 +79,7 @@ def main():
     update_set_information(json_data, connection)
     update_card_information(json_data, connection)
     update_card_link_information(json_data, connection)
+    update_ruling_table(json_data, connection)
 
     connection.commit()
 
@@ -502,15 +503,44 @@ INSERT INTO spellbook_cardprintinglanguage (
 
     return language_id
 
-def update_ruling_table(connection, json_data):
-    # Unlike the other tables, the rulings table can be safely truncated and rebuilt
-    # This is because there are no other tables that reference the ruling table
+def update_ruling_table(json_data, connection):
+
+    # The rulings table can be safely truncated and rebuilt because there are no other tables that reference it
     cursor = connection.cursor()
 
     cursor.execute("""
 TRUNCATE spellbook_cardruling;
-ALTER SEQUENCE spellbook_ruling_id_sequence RESTART;
-""");
+ALTER SEQUENCE spellbook_cardruling_id_seq RESTART;
+""")
+
+    for set in json_data:
+
+        for card in set[1]['cards']:
+            
+            # Skip cards that don't have additional names (links to other cards)
+            if not card.get('rulings'):
+                continue
+
+            for ruling in card['rulings']:
+
+                cursor.execute("""
+INSERT INTO spellbook_cardruling (
+    date,
+    text,
+    card_id
+) VALUES (
+    %(ruling_date)s,
+    %(ruling_text)s,
+    (
+        SELECT DISTINCT cp.card_id
+        FROM spellbook_cardprinting cp
+        JOIN spellbook_cardprintinglanguage cpl
+        ON cpl.card_printing_id = cp.id
+        WHERE cpl.card_name = %(card_name)s
+        AND cpl.language = 'English'
+    )
+) ON CONFLICT (date, text, card_id) DO NOTHING
+                """, {'card_name': card['name'], 'ruling_date': ruling['date'], 'ruling_text': ruling['text'] } )
 
     cursor.close()
 
