@@ -18,6 +18,10 @@ parser = OptionParser()
 parser.add_option("-c", "--connection", dest="connection_string",
                   help="The postgres connection string")
 
+
+parser.add_option("-m", "--mysql_connection", dest="mysql_connection_string",
+                  help="The mysql connection string")
+
 parser.add_option("-d", "--download", action="store_true", dest="download",
                   help="downloads the json file even if it already exists")
 
@@ -90,7 +94,9 @@ def main():
     update_card_information(json_data, connection)
     update_card_link_information(json_data, connection)
     update_ruling_table(json_data, connection)
-    migrate_database(connection)
+
+    if options.mysql_connection_string:
+        migrate_database(connection)
 
     connection.commit()
 
@@ -749,8 +755,9 @@ ORDER BY cpl.multiverse_id
 
 def migrate_database(connection):
 
-    cnx = mysql.connector.connect(user='ddb_usercards', password='Nu.ikl0LiUpFZUN2cOX850', host='127.0.0.1', database='delverdb')
-    
+    connectParams = dict(entry.split('=') for entry in options.mysql_connection_string.split(';'))
+    cnx = mysql.connector.connect(**connectParams)
+
     mysql_cursor = cnx.cursor()
     postgres_cursor = connection.cursor()
 
@@ -774,7 +781,6 @@ ORDER BY uc.id ASC
     mysql_cursor.execute(query)
 
     for (card_name, card_count, set_code) in mysql_cursor:
-        print('{0} {1} {2}'.format(card_name, card_count, set_code))
 
         postgres_cursor.execute("""
 INSERT INTO spellbook_userownedcard (
