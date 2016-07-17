@@ -322,10 +322,8 @@ def update_card(card, setcode, cursor, collector_number):
 
     cnum_match = None
     if card.get('number'):
-        re.search(
-            '^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
-            card['number']
-        )
+        re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
+            card['number'])
 
     printing_details = {
         'rarity':
@@ -802,6 +800,52 @@ INSERT INTO spellbook_userownedcard (
             'card_count': card_count,
             'card_name': card_name,
             'set_code': set_code
+        })
+
+    query = """
+SELECT 
+    c.name, 
+    ucc.setcode, 
+    ucc.datemodified, 
+    ucc.difference 
+FROM usercardchanges ucc
+JOIN cards c
+ON c.id = ucc.cardid
+WHERE userid = 1
+ORDER BY ucc.id ASC
+    """
+
+    mysql_cursor.execute(query)
+
+    for (card_name, set_code, date_modified, card_difference) in mysql_cursor:
+
+        postgres_cursor.execute("""
+INSERT INTO spellbook_usercardchange (
+    difference,
+    card_printing_language_id,
+    owner_id,
+    date
+) VALUES (
+    %(card_difference)s,
+    (
+        SELECT MIN(cpl.id)
+        FROM spellbook_cardprintinglanguage cpl
+        JOIN spellbook_cardprinting cp
+        ON cp.id = cpl.card_printing_id
+        JOIN spellbook_set s
+        ON s.id = cp.set_id
+        WHERE language = 'English'
+        AND card_name = %(card_name)s
+        AND s.code = %(set_code)s
+    ),
+    ( SELECT id FROM auth_user WHERE username = 'Liam' ),
+    %(date_modified)s
+)
+    """, {
+            'card_difference': card_difference,
+            'card_name': card_name,
+            'set_code': set_code,
+            'date_modified': date_modified
         })
 
     postgres_cursor.close()
