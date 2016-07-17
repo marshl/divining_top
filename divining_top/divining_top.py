@@ -31,7 +31,7 @@ parser.add_option("-r", "--reset", dest="reset_database",
 json_zip_file = path.join(dataFolder, 'AllSets-x.json.zip')
 json_data_file = path.join(dataFolder, 'AllSets-x.json')
 pretty_json_file = path.join(dataFolder, 'AllSets-x-pretty.json')
-jsonPrettyFile = path.join(dataFolder, 'AllSets-x-pretty.json')
+json_pretty_file = path.join(dataFolder, 'AllSets-x-pretty.json')
 
 colour_name_to_flag = {
     'white': 1,
@@ -57,13 +57,11 @@ rarity_name_to_code = {
     'mythic rare': 'M'
 }
 
-imageDownloadQueueLock = threading.Lock()
-imageDownloadQueue = queue.Queue()
-imageDownloadThreads = []
-imageDownloadExitFlag = False
-image_download_url = """
-http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card
-"""
+image_download_lock = threading.Lock()
+image_download_queue = queue.Queue()
+image_download_threads = []
+image_download_exit_flag = False
+image_download_url = 'http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card'
 
 
 def main():
@@ -81,7 +79,7 @@ def main():
 
     connection = connect_to_database()
 
-    if reset_database:
+    if options.reset_database:
         reset_database(connection)
 
     update_rarity_table(connection)
@@ -695,7 +693,7 @@ INSERT INTO spellbook_cardlink (
 
 def download_image_for_card(multiverse_id):
 
-    image_path = image_folder + str(multiverse_id) + '.jpg'
+    image_path = options.image_folder + str(multiverse_id) + '.jpg'
 
     print('Downloading {0}'.format(multiverse_id))
 
@@ -720,32 +718,32 @@ ORDER BY cpl.multiverse_id
 
     data = cursor.fetchall()
 
-    imageDownloadQueueLock.acquire()
+    image_download_lock.acquire()
 
     for row in data:
         multiverse_id = row[0]
-        image_path = image_folder + str(multiverse_id) + '.jpg'
+        image_path = options.image_folder + str(multiverse_id) + '.jpg'
 
         if path.exists(image_path):
             print('Skipping {0}'.format(multiverse_id))
             continue
 
-        imageDownloadQueue.put(multiverse_id)
+        image_download_queue.put(multiverse_id)
 
     cursor.close()
-    imageDownloadQueueLock.release()
+    image_download_lock.release()
 
     for i in range(1, 8):
         thread = imageDownloadThread(i)
         thread.start()
-        imageDownloadThreads.append(thread)
+        image_download_threads.append(thread)
 
-    while not imageDownloadQueue.empty():
+    while not image_download_queue.empty():
         pass
 
     imageDownloadExitFlag = True
 
-    for t in imageDownloadThreads:
+    for t in image_download_threads:
         t.join()
 
 
@@ -771,14 +769,14 @@ class imageDownloadThread(threading.Thread):
         self.threadID = threadID
 
     def run(self):
-        while not imageDownloadExitFlag:
-            imageDownloadQueueLock.acquire()
-            if not imageDownloadQueue.empty():
-                multiverse_id = imageDownloadQueue.get()
-                imageDownloadQueueLock.release()
+        while not image_download_exit_flag:
+            image_download_lock.acquire()
+            if not image_download_queue.empty():
+                multiverse_id = image_download_queue.get()
+                image_download_lock.release()
                 download_image_for_card(multiverse_id)
             else:
-                imageDownloadQueueLock.release()
+                image_download_lock.release()
 
             time.sleep(1)
 
