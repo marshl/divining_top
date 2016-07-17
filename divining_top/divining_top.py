@@ -9,6 +9,7 @@ import queue
 import threading
 from os import path
 import time
+import mysql.connector
 
 dataFolder = '../data'
 
@@ -89,6 +90,7 @@ def main():
     update_card_information(json_data, connection)
     update_card_link_information(json_data, connection)
     update_ruling_table(json_data, connection)
+    migrate_database(connection)
 
     connection.commit()
 
@@ -746,6 +748,64 @@ ORDER BY cpl.multiverse_id
     for t in image_download_threads:
         t.join()
 
+
+def migrate_database(connection):
+
+    cnx = mysql.connector.connect(user='ddb_usercards', password='Nu.ikl0LiUpFZUN2cOX850', host='127.0.0.1', database='delverdb')
+    
+    mysql_cursor = cnx.cursor()
+    postgres_cursor = connection.cursor()
+
+    postgres_cursor.execute("""
+TRUNCATE spellbook_userownedcard CASCADE;
+ALTER SEQUENCE spellbook_userownedcard_id_seq RESTART;
+
+TRUNCATE spellbook_usercardchange CASCADE;
+ALTER SEQUENCE spellbook_usercardchange_id_seq RESTART;
+    """)
+
+    query = """
+SELECT c.name, uc.count, uc.setcode
+FROM usercards uc
+JOIN cards c
+ON c.id = uc.cardid
+WHERE ownerid = 1
+ORDER BY uc.id ASC
+    """
+
+    mysql_cursor.execute(query)
+
+    for (card_name, card_count, set_code) in mysql_cursor:
+        print('{0} {1} {2}'.format(card_name, card_count, set_code))
+
+        postgres_cursor.execute("""
+INSERT INTO spellbook_userownedcard (
+    count,
+    card_printing_language_id,
+    owner_id
+) VALUES (
+    %(card_count)s,
+    (
+        SELECT MIN(cpl.id)
+        FROM spellbook_cardprintinglanguage cpl
+        JOIN spellbook_cardprinting cp
+        ON cp.id = cpl.card_printing_id
+        JOIN spellbook_set s
+        ON s.id = cp.set_id
+        WHERE language = 'English'
+        AND card_name = %(card_name)s
+        AND s.code = %(set_code)s
+    ),
+    ( SELECT id FROM auth_user WHERE username = 'Liam' )
+)
+    """, {
+            'card_count': card_count,
+            'card_name': card_name,
+            'set_code': set_code
+        })
+
+    postgres_cursor.close()
+    cnx.close()
 
 def get_colour_flags_from_codes(colour_codes):
     flags = 0
