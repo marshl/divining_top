@@ -62,10 +62,7 @@ rarity_name_to_code = {
     'mythic rare': 'M'
 }
 
-image_download_lock = threading.Lock()
 image_download_queue = queue.Queue()
-image_download_threads = []
-image_download_exit_flag = False
 image_download_url = 'http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid={0}&type=card'
 
 
@@ -286,7 +283,7 @@ def update_card_information(json_data, connection):
 
 def update_card(card, setcode, cursor, collector_number):
 
-    print('Updating card {0}'.format(card['name']))
+    print('Updating card {0}'.format(card['name']).encode())
 
     card_colour = 0
     if card.get('colors'):
@@ -711,8 +708,6 @@ def download_image_for_card(multiverse_id):
 
 def download_card_images(connection):
 
-    imageDownloadExitFlag = False
-
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -720,11 +715,10 @@ SELECT DISTINCT cpl.multiverse_id
 FROM spellbook_cardprintinglanguage cpl
 WHERE cpl.multiverse_id IS NOT NULL
 ORDER BY cpl.multiverse_id
+LIMIT 100
     """)
 
     data = cursor.fetchall()
-
-    image_download_lock.acquire()
 
     for row in data:
         multiverse_id = row[0]
@@ -737,20 +731,13 @@ ORDER BY cpl.multiverse_id
         image_download_queue.put(multiverse_id)
 
     cursor.close()
-    image_download_lock.release()
 
     for i in range(1, 8):
-        thread = imageDownloadThread(i)
+        thread = imageDownloadThread(image_download_queue)
+        thread.setDaemon(True)
         thread.start()
-        image_download_threads.append(thread)
 
-    while not image_download_queue.empty():
-        pass
-
-    imageDownloadExitFlag = True
-
-    for t in image_download_threads:
-        t.join()
+    image_download_queue.join()
 
 
 def migrate_database(connection):
@@ -874,21 +861,15 @@ def convert_to_number(val):
 
 
 class imageDownloadThread(threading.Thread):
-    def __init__(self, threadID):
+    def __init__(self, queue):
         threading.Thread.__init__(self)
-        self.threadID = threadID
+        self.queue = queue
 
     def run(self):
-        while not image_download_exit_flag:
-            image_download_lock.acquire()
-            if not image_download_queue.empty():
-                multiverse_id = image_download_queue.get()
-                image_download_lock.release()
-                download_image_for_card(multiverse_id)
-            else:
-                image_download_lock.release()
-
-            time.sleep(1)
+        while True:
+            multiverse_id = self.queue.get()
+            download_image_for_card(multiverse_id)
+            self.queue.task_done()
 
 
 if __name__ == "__main__":
