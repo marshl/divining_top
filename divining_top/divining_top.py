@@ -715,7 +715,6 @@ SELECT DISTINCT cpl.multiverse_id
 FROM spellbook_cardprintinglanguage cpl
 WHERE cpl.multiverse_id IS NOT NULL
 ORDER BY cpl.multiverse_id
-LIMIT 100
     """)
 
     data = cursor.fetchall()
