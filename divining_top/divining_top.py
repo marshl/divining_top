@@ -290,6 +290,7 @@ def update_card(card, setcode, cursor, collector_number):
         card_colour = get_colour_flags_from_names(card['colors'])
 
     card_details = {
+        'name': card['name'],
         'cost': card.get('manaCost'),
         'cmc': card.get('cmc') or 0,
         'colour': card_colour,
@@ -299,24 +300,24 @@ def update_card(card, setcode, cursor, collector_number):
             else 0,
         'colour_count': bin(card_colour).count('1'),
         'type':
-            ' '.join(card.get('types'))
+            ' '.join(card['types'])
             if card.get('types')
             else None,
         'subtype':
-            ' '.join(card.get('subtypes'))
+            ' '.join(card['subtypes'])
             if card.get('subtypes')
             else None,
         'power': card.get('power'),
         'num_power':
-            convert_to_number(card.get('power'))
+            convert_to_number(card['power'])
             if card.get('power')
             else 0,
         'toughness': card.get('toughness'),
-        'num_toughness': convert_to_number(card.get('toughness'))
+        'num_toughness': convert_to_number(card['toughness'])
             if card.get('toughness')
             else 0,
         'loyalty': card.get('loyalty'),
-        'num_loyalty': convert_to_number(card.get('loyalty'))
+        'num_loyalty': convert_to_number(card['loyalty'])
             if card.get('loyalty')
             else 0,
         'rules_text': card.get('text'),
@@ -358,12 +359,7 @@ def update_card(card, setcode, cursor, collector_number):
 SELECT DISTINCT
   c.id card_id
 FROM spellbook_card c
-JOIN spellbook_cardprinting cp
-  ON cp.card_id = c.id
-JOIN spellbook_cardprintinglanguage cpl
-  ON cpl.card_printing_id = cp.id
-WHERE cpl.language = 'English'
-AND cpl.card_name = %(name)s
+WHERE c.name = %(name)s
     """, {'name': card['name']})
 
     assert(cursor.rowcount < 2)
@@ -378,6 +374,7 @@ AND cpl.card_name = %(name)s
 
         cursor.execute("""
 INSERT INTO spellbook_card (
+    name,
     cost,
     cmc,
     colour,
@@ -394,6 +391,7 @@ INSERT INTO spellbook_card (
     rules_text,
     layout
 ) VALUES (
+    %(name)s,
     %(cost)s,
     %(cmc)s,
     %(colour)s,
