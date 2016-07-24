@@ -634,6 +634,10 @@ INSERT INTO spellbook_cardruling (
 
 def update_physical_card_info(cursor, card_data, language_id):
 
+     # Don't do anything for the back half of meld cards (their children/front cards will set up the physical ID)
+    if card_data['layout'] == 'meld' and len(card_data['names']) == 3:
+        return
+
     cursor.execute("""
 SELECT
   lang.language,
@@ -650,22 +654,16 @@ WHERE lang.id = %(language_id)s
     assert(row is not None)
     (language, set_id, physical_id, collector_number, collector_letter) = row
 
-    print('{0} ({1}) has physical id {2} in set {3} with language {4}'.format(card_data['name'], language_id, physical_id, set_id, language))
-
     if physical_id is not None:
         # Physical card and link already exists, no work to be done
         return
 
     if card_data.get('names'):
 
-        print('{0} has different names, checking for physical ID'.format(card_data['name']))
-
         for link_name in card_data['names']:
 
             if link_name == card_data['name']:
                 continue
-            
-            print('Testing {0}'.format(link_name))
 
             cursor.execute("""
 SELECT lang.physical_card_id
@@ -685,14 +683,9 @@ WHERe card.name = %(linked_name)s
                 print('No match')
                 continue
 
-            # Don't do anything for the back half of meld cards (their children/front cards will set up the physical ID)
-            if physical_id is not None and row[0] != physical_id and card_data['layout'] == 'meld':
-                return
-
             assert(physical_id is None or row[0] == physical_id)
 
             physical_id = row[0]
-            print('Match with id: {0}'.format(physical_id))
 
     
     if physical_id is None:
@@ -707,8 +700,6 @@ INSERT INTO spellbook_physicalcard (
         """, { 'layout': card_data['layout'] } ) 
         rows = cursor.fetchone()
         physical_id = rows[0]
-
-    print('physical ID {0}'.format(physical_id))
 
     cursor.execute("""
 UPDATE spellbook_cardprintinglanguage
