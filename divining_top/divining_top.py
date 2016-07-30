@@ -90,6 +90,7 @@ def main():
     update_set_information(json_data, connection)
     update_card_information(json_data, connection)
     update_ruling_table(json_data, connection)
+    update_physical_cards(json_data, connection)
 
     if options.mysql_connection_string:
         migrate_database(connection)
@@ -281,13 +282,72 @@ def update_card_information(json_data, connection):
     print("Done.")
 
 
-def update_card(card, setcode, cursor, collector_number):
+def get_card_id(cursor, card_name):
 
-    print('Updating card {0}'.format(card['name']).encode())
+    # Find whether a card of the given name exists in the database yet
+    cursor.execute("""
+SELECT c.id card_id
+FROM spellbook_card c
+WHERE c.name = %(name)s
+    """, {'name': card_name})
 
+    assert(cursor.rowcount < 2)
+
+    rows = cursor.fetchone()
+    if rows is not None:
+        return rows[0]
+
+    return None
+
+def get_card_printing_id(cursor, card_id, setcode, collector_number, collector_letter):
+    
+    cursor.execute("""
+SELECT id
+FROM spellbook_cardprinting
+WHERE card_id = %(card_id)s
+AND set_id = ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+AND collector_number = %(collector_number)s
+AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
+    """,
+    {
+        'card_id': card_id,
+        'setcode': setcode,
+        'collector_number': collector_number,
+        'collector_letter': collector_letter
+    })
+
+    assert(cursor.rowcount < 2)
+
+    rows = cursor.fetchone()
+    if rows is not None:
+        return rows[0]
+   
+    return None
+
+def get_card_printing_language_id(cursor, printing_id, language):
+
+    cursor.execute("""
+SELECT id
+FROM spellbook_cardprintinglanguage
+WHERE card_printing_id = %(printing_id)s
+AND language = %(language)s
+""", {
+        'language': language,
+        'printing_id': printing_id
+    })
+    rows = cursor.fetchone()
+
+    if rows is None:
+        return None
+
+    return rows[0]
+
+def get_card_details(card):
+    
     card_colour = 0
     if card.get('colors'):
         card_colour = get_colour_flags_from_names(card['colors'])
+
 
     card_details = {
         'name': card['name'],
@@ -323,6 +383,10 @@ def update_card(card, setcode, cursor, collector_number):
         'rules_text': card.get('text'),
     }
 
+    return card_details
+
+def get_card_printing_details(card, setcode, collector_number):
+
     cnum_match = None
     if card.get('number'):
         re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
@@ -348,25 +412,23 @@ def update_card(card, setcode, cursor, collector_number):
         'setcode': setcode
     }
 
+    return printing_details
+
+
+def update_card(card, setcode, cursor, collector_number):
+
+    print('Updating card {0}'.format(card['name']).encode())
+
+    card_details = get_card_details(card)
+
+    printing_details = get_card_printing_details(card, setcode, collector_number)
+
     language_details = {
         'language': 'English',
         'card_name': card['name'],
     }
 
-    # Find whether a card of the given name exists in the database yet
-    cursor.execute("""
-SELECT DISTINCT
-  c.id card_id
-FROM spellbook_card c
-WHERE c.name = %(name)s
-    """, {'name': card['name']})
-
-    assert(cursor.rowcount < 2)
-
-    rows = cursor.fetchone()
-    card_id = None
-    if rows is not None:
-        card_id = rows[0]
+    card_id = get_card_id(cursor, card['name'])
 
     # If the card does not exist in the database, then the
     if card_id is None:
@@ -440,28 +502,7 @@ UPDATE spellbook_card SET
 WHERE id = %(card_id)s
         """, card_details)
 
-    cursor.execute("""
-SELECT id
-FROM spellbook_cardprinting
-WHERE card_id = %(card_id)s
-AND set_id = ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
-AND collector_number = %(collector_number)s
-AND collector_letter IS NOT DISTINCT FROM %(collector_letter)s
-    """, {
-            'card_id': card_id,
-            'setcode': setcode,
-            'collector_number': printing_details['collector_number'],
-            'collector_letter': printing_details['collector_letter']
-        })
-
-    assert(cursor.rowcount < 2)
-
-    rows = cursor.fetchone()
-    if rows is not None:
-        printing_id = rows[0]
-        print('card printing already exists {0}'.format(printing_id))
-    else:
-        printing_id = None
+    printing_id = get_card_printing_id(cursor, card_id, setcode, printing_details['collector_number'], printing_details['collector_letter'])
 
     if printing_id is None:
 
@@ -508,25 +549,19 @@ original_text = %(original_text)s,
 original_type = %(original_type)s,
 card_id = %(card_id)s
 WHERE id = %(printing_id)s
-""", printing_details)
+        """, printing_details)
+
+
+    language_id = get_or_create_card_language(cursor, 'English', card['name'], printing_id, card.get('multiverseid'))
 
     if card.get('foreignNames'):
 
         for language in card.get('foreignNames'):
-            language_id = create_card_language(cursor,
+            language_id = get_or_create_card_language(cursor,
                                                language['language'],
                                                language['name'],
                                                printing_id,
                                                language.get('multiverseid'))
-            update_physical_card_info(cursor, card, language_id)
-
-    language_id = create_card_language(cursor,
-                                       'English',
-                                       card['name'],
-                                       printing_id,
-                                       card.get('multiverseid'))
-
-    update_physical_card_info(cursor, card, language_id)
 
 
 def get_colour_flags_from_names(colour_names):
@@ -537,27 +572,10 @@ def get_colour_flags_from_names(colour_names):
     return flags
 
 
-def create_card_language(cursor, language, name, printing_id, multiverse_id):
-
-    cursor.execute("""
-SELECT id
-FROM spellbook_cardprintinglanguage
-WHERE card_printing_id = %(printing_id)s
-AND language = %(language)s
-""", {
-        'language': language,
-        'name': name,
-        'printing_id': printing_id
-    })
-    rows = cursor.fetchone()
-
-    language_id = None
-
-    if rows is not None:
-        language_id = rows[0]
-
-        print('Language already exists for {0} {1}'.format(language,
-                                                           language_id))
+def get_or_create_card_language(cursor, language, name, printing_id, multiverse_id):
+       
+    language_id = get_card_printing_language_id(cursor, printing_id, language)
+    if language_id is not None:
         return language_id
 
     cursor.execute("""
@@ -632,17 +650,64 @@ INSERT INTO spellbook_cardruling (
     cursor.close()
 
 
+def update_physical_cards(json_data, connection):
+
+    cursor = connection.cursor()
+
+    for set in json_data:
+
+        setcode = set[0]
+
+        if setcode != 'EMN':
+            continue
+
+        collector_number = 0
+        for card_data in set[1]['cards']:
+            collector_number += 1
+            
+            card_id = get_card_id(cursor, card_data['name'])
+            assert(card_id is not None)
+            printing_details = get_card_printing_details(card_data, setcode, collector_number)
+            printing_id = get_card_printing_id(cursor, card_id, setcode, printing_details['collector_number'], printing_details['collector_letter'])
+            assert(printing_id is not None)
+
+            language_id = get_card_printing_language_id(cursor, printing_id, 'English')
+            update_physical_card_info(cursor, card_data, language_id)
+
+            if card_data.get('foreignNames'):
+                for card_language in card_data.get('foreignNames'):
+                    
+                    language_id = get_card_printing_language_id(cursor, printing_id, card_language['language'])
+
+                    update_physical_card_info(cursor, card_data, language_id)
+
+
+
+
 def update_physical_card_info(cursor, card_data, language_id):
 
-     # Don't do anything for the back half of meld cards (their children/front cards will set up the physical ID)
+    # Don't do anything for the back half of meld cards (their children/front cards will set up the physical ID)
     if card_data['layout'] == 'meld' and len(card_data['names']) == 3:
+        return
+
+    cursor.execute("""
+SELECT physical_card_id
+FROM spellbook_physicalcardlink
+WHERE printing_language_id = %(language_id)s
+    """, { 'language_id': language_id } )
+
+    row = cursor.fetchone()
+    physical_id = row[0] if row is not None else None
+
+    if physical_id is not None:
+        print('Physical ID for {0} already exists, no work to be done'.format(card_data['name']))
+        # Physical card and link already exists, no work to be done
         return
 
     cursor.execute("""
 SELECT
   lang.language,
   printing.set_id,
-  physical_card_id,
   collector_number,
   collector_letter
 FROM spellbook_cardprintinglanguage lang
@@ -652,11 +717,9 @@ WHERE lang.id = %(language_id)s
     """, { 'language_id': language_id } )
     row = cursor.fetchone()
     assert(row is not None)
-    (language, set_id, physical_id, collector_number, collector_letter) = row
+    (language, set_id, collector_number, collector_letter) = row
 
-    if physical_id is not None:
-        # Physical card and link already exists, no work to be done
-        return
+    linked_language_ids = []
 
     if card_data.get('names'):
 
@@ -665,8 +728,10 @@ WHERE lang.id = %(language_id)s
             if link_name == card_data['name']:
                 continue
 
+            print('Testing other name {0}'.format(link_name))
+
             cursor.execute("""
-SELECT lang.physical_card_id
+SELECT lang.id
 FROM spellbook_card card
 JOIN spellbook_cardprinting printing
   ON printing.card_id = card.id
@@ -674,38 +739,51 @@ JOIN spellbook_cardprinting printing
 JOIN spellbook_cardprintinglanguage lang
   ON lang.card_printing_id = printing.id
  AND lang.language = %(language)s
- AND lang.physical_card_id IS NOT NULL
 WHERe card.name = %(linked_name)s
         """, { 'set_id': set_id, 'language': language, 'linked_name': link_name } )
 
             row = cursor.fetchone()
             if row is None:
-                print('No match')
+                print('{0} has no physical ID'.format(link_name))
                 continue
 
-            assert(physical_id is None or row[0] == physical_id)
+            assert(cursor.rowcount == 1)
 
-            physical_id = row[0]
+            link_language_id = row[0]
 
-    
-    if physical_id is None:
+            linked_language_ids.append( link_language_id )
+            print('language ID of {0} is {1}'.format(link_name, link_language_id))
+            #assert(physical_id is None or row[0] == physical_id)
 
-        print('No id found, creating a new one')
-        cursor.execute("""
+            #physical_id = row[0]
+
+    #if len(linked_language_ids) == 0:
+    #if physical_id is None:
+
+    cursor.execute("""
 INSERT INTO spellbook_physicalcard (
     layout
 ) VALUES (
     %(layout)s
 ) RETURNING id
-        """, { 'layout': card_data['layout'] } ) 
-        rows = cursor.fetchone()
-        physical_id = rows[0]
+    """, { 'layout':  'meld-back' if card_data['layout'] == 'meld' and len(card_data['names']) == 3 else card_data['layout']} ) 
+    rows = cursor.fetchone()
+    physical_id = rows[0]
+    print('new id is {0}'.format(physical_id))
 
-    cursor.execute("""
-UPDATE spellbook_cardprintinglanguage
-SET physical_card_id = %(physical_id)s
-WHERE id = %(language_id)s
-    """, { 'language_id': language_id, 'physical_id': physical_id } )
+    linked_language_ids.append(language_id)
+
+    for id in linked_language_ids:
+        print('linking to {0}'.format(id))
+        cursor.execute("""
+INSERT INTO spellbook_physicalcardlink (
+    physical_card_id,
+    printing_language_id
+) VALUES (
+    %(physical_id)s,
+    %(language_id)s
+) ON CONFLICT (physical_card_id, printing_language_id) DO NOTHING""",  { 'language_id': id, 'physical_id': physical_id } )
+        print('Creating new card link of {0}'.format(id))
 
 
 def download_image_for_card(multiverse_id):
