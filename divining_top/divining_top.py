@@ -86,6 +86,7 @@ def main():
 
     update_rarity_table(connection)
 
+    update_language_information(connection)
     update_block_information(json_data, connection)
     update_set_information(json_data, connection)
     update_card_information(json_data, connection)
@@ -205,6 +206,55 @@ ON CONFLICT(symbol) DO NOTHING;
 
     cursor.close()
 
+def update_language_information(connection):
+    
+    cursor = connection.cursor()
+
+    cursor.execute("""
+INSERT INTO spellbook_language (
+    name,
+    mci_code
+) VALUES (
+   'English',
+   'en'
+), (
+   'Chinese Simplified',
+   'tw'
+), (
+   'Chinese Traditional',
+   'ch'
+), (
+   'French',
+   'fr'
+), (
+   'German',
+   'de'
+), (
+   'Italian',
+   'it'
+), (
+   'Japanese',
+   'jp'
+), (
+   'Italian',
+   'it'
+), (
+   'Portuguese (Brazil)',
+   'pt'
+), (
+   'Russian',
+   'ru'
+), (
+   'Spanish',
+   'es'
+), (
+   'Korean',
+   NULL
+)
+ON CONFLICT(name) DO NOTHING;
+""")
+
+    cursor.close()
 
 def update_block_information(json_data, connection):
 
@@ -248,17 +298,20 @@ INSERT INTO spellbook_set (
     code,
     name,
     release_date,
-    block_id
+    block_id,
+    mci_code
 ) VALUES (
     %(set_code)s,
     %(set_name)s,
     %(release_date)s,
-    (SELECT id FROM spellbook_block WHERE name = %(block_name)s)
-) ON CONFLICT (code) DO NOTHING""", {
+    (SELECT id FROM spellbook_block WHERE name = %(block_name)s),
+    %(mci_code)s
+) ON CONFLICT (code) DO UPDATE SET mci_code = EXCLUDED.mci_code""", {
             'set_code': set[0],
             'set_name': set[1]['name'],
             'release_date': set[1]['releaseDate'],
-            'block_name': set[1].get('block')
+            'block_name': set[1].get('block'),
+            'mci_code': set[1].get('magicCardsInfoCode')
         })
 
     cursor.close()
@@ -268,7 +321,6 @@ INSERT INTO spellbook_set (
 
 def update_card_information(json_data, connection):
 
-    print("Updating card information... ", end="")
     cursor = connection.cursor()
 
     for set in json_data:
@@ -279,7 +331,6 @@ def update_card_information(json_data, connection):
             update_card(card, set[0], cursor, collector_number)
 
     cursor.close()
-    print("Done.")
 
 
 def get_card_id(cursor, card_name):
@@ -330,7 +381,7 @@ def get_card_printing_language_id(cursor, printing_id, language):
 SELECT id
 FROM spellbook_cardprintinglanguage
 WHERE card_printing_id = %(printing_id)s
-AND language = %(language)s
+AND language_id = ( SELECT id FROM spellbook_language WHERE name = %(language)s )
 """, {
         'language': language,
         'printing_id': printing_id
@@ -580,12 +631,12 @@ def get_or_create_card_language(cursor, language, name, printing_id, multiverse_
 
     cursor.execute("""
 INSERT INTO spellbook_cardprintinglanguage (
-    language,
+    language_id,
     card_name,
     card_printing_id,
     multiverse_id
 ) VALUES (
-    %(language)s,
+    ( SELECT id FROM spellbook_language WHERE name = %(language)s ),
     %(card_name)s,
     %(card_printing_id)s,
     %(multiverse_id)s
@@ -658,9 +709,6 @@ def update_physical_cards(json_data, connection):
 
         setcode = set[0]
 
-        if setcode != 'EMN':
-            continue
-
         collector_number = 0
         for card_data in set[1]['cards']:
             collector_number += 1
@@ -700,20 +748,22 @@ WHERE printing_language_id = %(language_id)s
     physical_id = row[0] if row is not None else None
 
     if physical_id is not None:
-        print('Physical ID for {0} already exists, no work to be done'.format(card_data['name']))
+        print('Physical ID for {0} already exists'.format(card_data['name']))
         # Physical card and link already exists, no work to be done
         return
 
     cursor.execute("""
 SELECT
-  lang.language,
+  lang.name,
   printing.set_id,
   collector_number,
   collector_letter
-FROM spellbook_cardprintinglanguage lang
+FROM spellbook_cardprintinglanguage printlang
 JOIN spellbook_cardprinting printing
-ON printing.id = lang.card_printing_id
-WHERE lang.id = %(language_id)s
+  ON printing.id = printlang.card_printing_id
+JOIN spellbook_language lang
+  ON lang.id = printlang.language_id
+WHERE printlang.id = %(language_id)s
     """, { 'language_id': language_id } )
     row = cursor.fetchone()
     assert(row is not None)
@@ -728,17 +778,17 @@ WHERE lang.id = %(language_id)s
             if link_name == card_data['name']:
                 continue
 
-            print('Testing other name {0}'.format(link_name))
-
             cursor.execute("""
-SELECT lang.id
+SELECT printlang.id
 FROM spellbook_card card
 JOIN spellbook_cardprinting printing
   ON printing.card_id = card.id
  AND printing.set_id = %(set_id)s
-JOIN spellbook_cardprintinglanguage lang
-  ON lang.card_printing_id = printing.id
- AND lang.language = %(language)s
+JOIN spellbook_cardprintinglanguage printlang
+  ON printlang.card_printing_id = printing.id
+JOIN spellbook_language lang
+  ON lang.id = printlang.language_id
+  AND lang.name = %(language)s
 WHERe card.name = %(linked_name)s
         """, { 'set_id': set_id, 'language': language, 'linked_name': link_name } )
 
@@ -752,13 +802,6 @@ WHERe card.name = %(linked_name)s
             link_language_id = row[0]
 
             linked_language_ids.append( link_language_id )
-            print('language ID of {0} is {1}'.format(link_name, link_language_id))
-            #assert(physical_id is None or row[0] == physical_id)
-
-            #physical_id = row[0]
-
-    #if len(linked_language_ids) == 0:
-    #if physical_id is None:
 
     cursor.execute("""
 INSERT INTO spellbook_physicalcard (
@@ -769,7 +812,6 @@ INSERT INTO spellbook_physicalcard (
     """, { 'layout':  'meld-back' if card_data['layout'] == 'meld' and len(card_data['names']) == 3 else card_data['layout']} ) 
     rows = cursor.fetchone()
     physical_id = rows[0]
-    print('new id is {0}'.format(physical_id))
 
     linked_language_ids.append(language_id)
 
@@ -815,8 +857,8 @@ ORDER BY cpl.multiverse_id
         multiverse_id = row[0]
         image_path = options.image_folder + str(multiverse_id) + '.jpg'
 
+        # Skip the image if it already exists
         if path.exists(image_path):
-            print('Skipping {0}'.format(multiverse_id))
             continue
 
         image_download_queue.put(multiverse_id)
@@ -861,18 +903,24 @@ ORDER BY uc.id ASC
     for (card_name, card_count, set_code) in mysql_cursor:
 
         postgres_cursor.execute("""
-SELECT MIN(cpl.physical_card_id)
-FROM spellbook_cardprintinglanguage cpl
-JOIN spellbook_cardprinting cp
-ON cp.id = cpl.card_printing_id
-JOIN spellbook_set s
-ON s.id = cp.set_id
-WHERE language = 'English'
-AND card_name = %(card_name)s
-AND s.code = %(set_code)s
+SELECT MIN(link.physical_card_id)
+FROM spellbook_physicalcardlink link
+JOIN spellbook_cardprintinglanguage printlang
+  ON printlang.id = link.printing_language_id
+JOIN spellbook_cardprinting print
+  ON print.id = printlang.card_printing_id
+JOIN spellbook_set set
+  ON set.id = print.set_id
+JOIN spellbook_language lang
+  ON lang.id = printlang.language_id
+WHERE lang.name = 'English'
+AND printlang.card_name = %(card_name)s
+AND set.code = %(set_code)s
         """, {'card_name': card_name, 'set_code': set_code } )
         row = postgres_cursor.fetchone()
         physical_id = row[0]
+
+        assert(physical_id is not None)
 
         postgres_cursor.execute("""
 SELECT 1 FROM spellbook_userownedcard
@@ -924,15 +972,19 @@ INSERT INTO spellbook_usercardchange (
 ) VALUES (
     %(card_difference)s,
     (
-        SELECT MIN(cpl.physical_card_id)
-        FROM spellbook_cardprintinglanguage cpl
-        JOIN spellbook_cardprinting cp
-        ON cp.id = cpl.card_printing_id
-        JOIN spellbook_set s
-        ON s.id = cp.set_id
-        WHERE language = 'English'
-        AND card_name = %(card_name)s
-        AND s.code = %(set_code)s
+        SELECT MIN(link.physical_card_id)
+        FROM spellbook_physicalcardlink link
+        JOIN spellbook_cardprintinglanguage printlang
+          ON printlang.id = link.printing_language_id
+        JOIN spellbook_cardprinting print
+          ON print.id = printlang.card_printing_id
+        JOIN spellbook_set set
+          ON set.id = print.set_id
+        JOIN spellbook_language lang
+          ON lang.id = printlang.language_id
+        WHERE lang.name = 'English'
+        AND printlang.card_name = %(card_name)s
+        AND set.code = %(set_code)s
     ),
     ( SELECT id FROM auth_user WHERE username = 'Liam' ),
     %(date_modified)s
