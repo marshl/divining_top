@@ -85,7 +85,6 @@ def main():
         reset_database(connection)
 
     update_rarity_table(connection)
-
     update_language_information(connection)
     update_block_information(json_data, connection)
     update_set_information(json_data, connection)
@@ -439,9 +438,13 @@ def get_card_details(card):
 def get_card_printing_details(card, setcode, collector_number):
 
     cnum_match = None
-    if card.get('number'):
-        re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
+    if 'number' in card:
+        cnum_match = re.search('^(?P<special>[a-z]+)?(?P<number>[0-9]+)(?P<letter>[a-z]+)?$',
             card['number'])
+
+    mci_number_match = None
+    if 'mciNumber' in card:
+        mci_number_match = re.search('^(/(?P<setcode>[^/]*)/(?P<language>[^/]*)/)?(?P<number>[0-9]+)(\.html)?$', card['mciNumber'])
 
     printing_details = {
         'rarity':
@@ -460,7 +463,10 @@ def get_card_printing_details(card, setcode, collector_number):
             else None,
         'original_text': card.get('originalText'),
         'original_type': card.get('originalType'),
-        'setcode': setcode
+        'setcode': setcode,
+        'mci_number': mci_number_match.group('number')
+                      if mci_number_match and 'number' not in card
+                      else None
     }
 
     return printing_details
@@ -567,7 +573,8 @@ INSERT INTO spellbook_cardprinting (
     original_text,
     original_type,
     card_id,
-    set_id
+    set_id,
+    mci_number
 ) VALUES (
     ( SELECT id FROM spellbook_rarity WHERE name = %(rarity)s ),
     %(flavour_text)s,
@@ -577,7 +584,8 @@ INSERT INTO spellbook_cardprinting (
     %(original_text)s,
     %(original_type)s,
     %(card_id)s,
-    ( SELECT id FROM spellbook_set WHERE code = %(setcode)s )
+    ( SELECT id FROM spellbook_set WHERE code = %(setcode)s ),
+    %(mci_number)s
 )
         """, printing_details)
 
@@ -598,7 +606,8 @@ collector_number = %(collector_number)s,
 collector_letter = %(collector_letter)s,
 original_text = %(original_text)s,
 original_type = %(original_type)s,
-card_id = %(card_id)s
+card_id = %(card_id)s,
+mci_number = %(mci_number)s
 WHERE id = %(printing_id)s
         """, printing_details)
 
