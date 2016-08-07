@@ -397,7 +397,7 @@ AND language_id = ( SELECT id FROM spellbook_language WHERE name = %(language)s 
 def get_card_details(card):
     
     card_colour = 0
-    if card.get('colors'):
+    if 'colors' in card:
         card_colour = get_colour_flags_from_names(card['colors'])
 
 
@@ -408,7 +408,7 @@ def get_card_details(card):
         'colour': card_colour,
         'colour_identity':
             get_colour_flags_from_codes(card['colorIdentity'])
-            if card.get('colourIdentity')
+            if 'colourIdentity' in card
             else 0,
         'colour_count': bin(card_colour).count('1'),
         'type':
@@ -451,7 +451,7 @@ def get_card_printing_details(card, setcode, collector_number):
     printing_details = {
         'rarity':
             'Timeshifted'
-            if card.get('timeshifted') and card['timeshifted']
+            if 'timeshifted' in card
             else card.get('rarity'),
         'flavour_text': card.get('flavor'),
         'artist': card['artist'],
@@ -616,9 +616,9 @@ WHERE id = %(printing_id)s
 
     language_id = get_or_create_card_language(cursor, 'English', card['name'], printing_id, card.get('multiverseid'))
 
-    if card.get('foreignNames'):
+    if 'foreignNames' in card:
 
-        for language in card.get('foreignNames'):
+        for language in card['foreignNames']:
             language_id = get_or_create_card_language(cursor,
                                                language['language'],
                                                language['name'],
@@ -684,7 +684,7 @@ ALTER SEQUENCE spellbook_cardruling_id_seq RESTART;
 
             # Skip cards that don't have additional names (links to other
             # cards)
-            if not card.get('rulings'):
+            if 'rulings' not in card:
                 continue
 
             for ruling in card['rulings']:
@@ -733,8 +733,8 @@ def update_physical_cards(json_data, connection):
             language_id = get_card_printing_language_id(cursor, printing_id, 'English')
             update_physical_card_info(cursor, card_data, language_id)
 
-            if card_data.get('foreignNames'):
-                for card_language in card_data.get('foreignNames'):
+            if 'foreignNames' in card_data:
+                for card_language in card_data['foreignNames']:
                     
                     language_id = get_card_printing_language_id(cursor, printing_id, card_language['language'])
 
@@ -782,7 +782,7 @@ WHERE printlang.id = %(language_id)s
 
     linked_language_ids = []
 
-    if card_data.get('names'):
+    if 'names' in card_data:
 
         for link_name in card_data['names']:
 
