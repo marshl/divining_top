@@ -158,6 +158,8 @@ TRUNCATE spellbook_rarity CASCADE;
 ALTER SEQUENCE spellbook_rarity_id_seq RESTART;
 TRUNCATE spellbook_set CASCADE;
 ALTER SEQUENCE spellbook_set_id_seq RESTART;
+TRUNCATE spellbook_language;
+ALTER SEQEUNCE spellbook_language_id_seq RESTART;
 """)
 
     cursor.close()
