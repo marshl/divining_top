@@ -745,7 +745,8 @@ def update_physical_cards(json_data, connection):
 
 def update_physical_card_info(cursor, card_data, language_id):
 
-    # Don't do anything for the back half of meld cards (their children/front cards will set up the physical ID)
+    # Don't do anything for the back half of meld cards (their children/front
+    # cards will set up the physical ID)
     if card_data['layout'] == 'meld' and len(card_data['names']) == 3:
         return
 
@@ -753,7 +754,7 @@ def update_physical_card_info(cursor, card_data, language_id):
 SELECT physical_card_id
 FROM spellbook_physicalcardlink
 WHERE printing_language_id = %(language_id)s
-    """, { 'language_id': language_id } )
+    """, { 'language_id': language_id })
 
     row = cursor.fetchone()
     physical_id = row[0] if row is not None else None
@@ -775,7 +776,7 @@ JOIN spellbook_cardprinting printing
 JOIN spellbook_language lang
   ON lang.id = printlang.language_id
 WHERE printlang.id = %(language_id)s
-    """, { 'language_id': language_id } )
+    """, { 'language_id': language_id })
     row = cursor.fetchone()
     assert(row is not None)
     (language, set_id, collector_number, collector_letter) = row
@@ -801,7 +802,7 @@ JOIN spellbook_language lang
   ON lang.id = printlang.language_id
   AND lang.name = %(language)s
 WHERe card.name = %(linked_name)s
-        """, { 'set_id': set_id, 'language': language, 'linked_name': link_name } )
+        """, { 'set_id': set_id, 'language': language, 'linked_name': link_name })
 
             row = cursor.fetchone()
             if row is None:
@@ -812,7 +813,7 @@ WHERe card.name = %(linked_name)s
 
             link_language_id = row[0]
 
-            linked_language_ids.append( link_language_id )
+            linked_language_ids.append(link_language_id)
 
     cursor.execute("""
 INSERT INTO spellbook_physicalcard (
@@ -820,7 +821,7 @@ INSERT INTO spellbook_physicalcard (
 ) VALUES (
     %(layout)s
 ) RETURNING id
-    """, { 'layout':  'meld-back' if card_data['layout'] == 'meld' and len(card_data['names']) == 3 else card_data['layout']} ) 
+    """, { 'layout':  'meld-back' if card_data['layout'] == 'meld' and len(card_data['names']) == 3 else card_data['layout']}) 
     rows = cursor.fetchone()
     physical_id = rows[0]
 
@@ -835,7 +836,7 @@ INSERT INTO spellbook_physicalcardlink (
 ) VALUES (
     %(physical_id)s,
     %(language_id)s
-) ON CONFLICT (physical_card_id, printing_language_id) DO NOTHING""",  { 'language_id': id, 'physical_id': physical_id } )
+) ON CONFLICT (physical_card_id, printing_language_id) DO NOTHING""",  { 'language_id': id, 'physical_id': physical_id })
         print('Creating new card link of {0}'.format(id))
 
 
@@ -927,7 +928,7 @@ JOIN spellbook_language lang
 WHERE lang.name = 'English'
 AND printlang.card_name = %(card_name)s
 AND set.code = %(set_code)s
-        """, {'card_name': card_name, 'set_code': set_code } )
+        """, {'card_name': card_name, 'set_code': set_code })
         row = postgres_cursor.fetchone()
         physical_id = row[0]
 
@@ -937,7 +938,7 @@ AND set.code = %(set_code)s
 SELECT 1 FROM spellbook_userownedcard
 WHERE owner_id = ( SELECT id FROM auth_user WHERE username = 'Liam' )
 AND physical_card_id = %(physical_id)s
-        """, { 'physical_id': physical_id } )
+        """, { 'physical_id': physical_id })
         row = postgres_cursor.fetchone()
         if row is not None:
             continue
